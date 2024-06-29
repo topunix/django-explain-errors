@@ -13,7 +13,7 @@ This Django middleware captures errors and exceptions, sends them to OpenAI for 
 1. **Clone the repository**:
 
    ```sh
-   git clone https://github.com/yourusername/django-explain-errors.git
+   git clone https://github.com/topunix/django-explain-errors.git
    cd django-explain-errors
    ```
 
