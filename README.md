@@ -13,8 +13,8 @@ This Django middleware captures errors and exceptions, sends them to OpenAI for 
 1. **Clone the repository**:
 
    ```sh
-   git clone https://github.com/yourusername/django-explain-errors-middleware.git
-   cd django-explain-errors-middleware
+   git clone https://github.com/yourusername/django-explain-errors.git
+   cd django-explain-errors
    ```
 
 2. **Install dependencies**:
@@ -25,14 +25,14 @@ This Django middleware captures errors and exceptions, sends them to OpenAI for 
 
 3. **Add the middleware to your Django project**:
 
-   - Copy `explain_errors_middleware.py` to your Django project's root directory.
+   - Copy `explain_errors.py` to your Django project's root directory.
 
    - Open your `settings.py` file and add the middleware to the `MIDDLEWARE` list:
 
      ```python
      MIDDLEWARE = [
          ...
-         'explain_errors_middleware.ExplainErrorsMiddleware',
+         'explain_errors.ExplainErrorsMiddleware',
          ...
      ]
      ```
@@ -70,7 +70,7 @@ DEBUG = True
 
 MIDDLEWARE = [
     ...
-    'explain_errors_middleware.ExplainErrorsMiddleware',
+    'explain_errors.ExplainErrorsMiddleware',
     ...
 ]
 
