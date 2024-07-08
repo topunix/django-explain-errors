@@ -9,6 +9,18 @@ from django.http import JsonResponse
 class ExplainErrorsMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
+        if settings.DEBUG:
+            # Load environment variables from .env file
+            load_dotenv()
+            # Get the OpenAI API key from environment variable
+            openai_api_key = os.getenv("OPENAI_API_KEY")
+            if not openai_api_key:
+                raise ValueError("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
+
+            self.openai_client = OpenAI(
+                api_key=openai_api_key,
+            )
+            self.api_called = False  # Flag to track API call
 
     def __call__(self, request):
         try:
@@ -18,27 +30,17 @@ class ExplainErrorsMiddleware:
         return None
 
     def process_exception(self, request, exception):
-        if settings.DEBUG:
+
+        if settings.DEBUG and not self.api_called:
             # Get the exception traceback
             tb = traceback.format_exc()
-
-            # Load environment variables from .env file
-            load_dotenv()
-            # Get the OpenAI API key from environment variable
-            openai_api_key = os.getenv("OPENAI_API_KEY")
-            if not openai_api_key:
-                raise ValueError("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
-
-            client = OpenAI(
-                api_key=openai_api_key,
-            )
 
             # Construct the prompt
             prompt = f"Explain the following Django error in simple terms:\n\n{tb}"
 
             try:
  		# Call OpenAI API
-                response = client.chat.completions.create(
+                response = self.openai_client.chat.completions.create(
                     model="gpt-3.5-turbo",
                     messages=[
                         {"role": "system", "content": "You are a helpful assistant."},
@@ -50,6 +52,7 @@ class ExplainErrorsMiddleware:
 
                 # Print the explanation to stdout
                 print("Error Explanation by OpenAI:\n", explanation)
+                self.api_called = True # Set flag after the call`
 
             except Exception as e:
                 # In case of any issues with the OpenAI API call, print an error message
