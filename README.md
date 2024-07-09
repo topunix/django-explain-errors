@@ -10,20 +10,12 @@ This Django middleware captures errors and exceptions, sends them to OpenAI for 
 
 ## Installation
 
-1. **Clone the repository**:
+1. Install django-explain-errors by running:
+```bash
+pip install django-explain-errors
+```
 
-   ```sh
-   git clone https://github.com/topunix/django-explain-errors.git
-   cd django-explain-errors
-   ```
-
-2. **Install dependencies**:
-
-   ```sh
-   pip install openai python-dotenv
-   ```
-
-3. **Add the middleware to your Django project**:
+2. **Add the middleware to your Django project**:
 
    - Copy `explain_errors.py` to your Django project's root directory.
 
