@@ -13,7 +13,7 @@ class ExplainErrorsMiddleware:
             # Load environment variables from .env file
             load_dotenv()
             # Get the OpenAI API key from environment variable
-            openai_api_key = os.getenv("OPENAI_API_KEY", settings.OPENAI_API_KEY)
+            openai_api_key = os.getenv("OPENAI_API_KEY", getattr(settings, 'OPENAI_API_KEY', None))
             if not openai_api_key:
                 raise ValueError("OpenAI API key not found. Please set the OPENAI_API_KEY environment variable.")
 
