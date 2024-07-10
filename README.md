@@ -17,21 +17,18 @@ pip install django-explain-errors
 
 2. **Add the middleware to your Django project**:
 
-   - Copy `explain_errors.py` to your Django project's root directory.
-
-   - Open your `settings.py` file and add the middleware to the `MIDDLEWARE` list:
+   - Open your `settings.py` file and add the middleware to the `MIDDLEWARE` list. Ensure that the middleware is added last in the list: 
 
      ```python
      MIDDLEWARE = [
          ...
          'explain_errors.ExplainErrorsMiddleware',
-         ...
      ]
      ```
 
 4. **Set up environment variables**:
 
-   - Create a `.env` file in your project’s root directory and add your OpenAI API key:
+   - Create a `.env` file in your project’s root directory and add your OpenAI API key. Alternatively, you can list the API key in `settings.py`:
 
      ```plaintext
      OPENAI_API_KEY=your_openai_api_key_here
@@ -63,7 +60,6 @@ DEBUG = True
 MIDDLEWARE = [
     ...
     'explain_errors.ExplainErrorsMiddleware',
-    ...
 ]
 
 # .env
