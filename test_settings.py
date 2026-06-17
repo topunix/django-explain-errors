@@ -1,0 +1,6 @@
+SECRET_KEY = "x"
+DEBUG = False
+ALLOWED_HOSTS = ["*"]
+DATABASES = {}
+INSTALLED_APPS = []
+USE_TZ = True
