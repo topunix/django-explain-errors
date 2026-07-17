@@ -1,0 +1,134 @@
+# Hardening Design: Redaction and Rate Limiting
+
+Status: approved for implementation
+Scope: one-off task spec. Durable invariants get promoted to CLAUDE.md after merge.
+
+## Goals
+
+1. Sanitize tracebacks before they leave the process (redaction).
+2. Replace the `api_called` one-shot flag with a real rate limiter.
+3. Preserve existing behavior otherwise: DEBUG-only, sync and async paths, stdout output.
+
+Non-goals: provider abstraction, background processing, the RAG layer.
+
+## 1. Redaction
+
+### Module
+
+`explain_errors/sanitize.py`
+
+```python
+def sanitize_traceback(tb: str) -> str:
+    """Redact secrets and PII from a traceback string.
+
+    INVARIANT: every string sent to an external service or written to a
+    persistent index (future RAG layer) MUST pass through this function first.
+    """
+```
+
+Pure function, no Django imports at module level (read settings inside the
+function via `django.conf.settings` so tests can override).
+
+### Default patterns (compiled once, applied in order)
+
+1. Secret-like assignments: values following keys matching
+   `(?i)(secret|password|passwd|token|api_?key|auth)\s*[=:]\s*` up to
+   whitespace, quote, or comma.
+2. Bearer/authorization headers: `(?i)(authorization|bearer)\s*[:=]?\s*\S+`.
+3. Email addresses: standard RFC-lite pattern.
+
+Replacement string: `[REDACTED]`.
+
+### Settings (flat names, matching existing OPENAI_* convention)
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `EXPLAIN_ERRORS_REDACT_PATTERNS` | `[]` | Extra regex strings, appended after defaults |
+| `EXPLAIN_ERRORS_REDACT_REPLACEMENT` | `"[REDACTED]"` | Replacement token |
+| `EXPLAIN_ERRORS_REDACT_DISABLE_DEFAULTS` | `False` | Escape hatch; user patterns only |
+
+### Pipeline position
+
+In `process_exception`, order is: format traceback, truncate to
+`OPENAI_MAX_TRACEBACK_CHARS`, then sanitize the truncated string. Sanitizing
+the exact payload that ships is what matters; sanitizing pre-truncation text
+wastes work on discarded frames.
+
+Invalid user regexes must not break error handling: compile at first use
+inside try/except, print a one-line warning, skip the bad pattern.
+
+## 2. Rate Limiting
+
+### Decision on `api_called`
+
+Remove the flag. Replace with an in-process sliding window: allow up to N
+explanations per M seconds per worker process. This resolves the open
+question about the flag's scope: the intended behavior is "limit API spend",
+not "explain exactly one error per worker lifetime".
+
+### Module
+
+`explain_errors/throttle.py`
+
+```python
+class SlidingWindowThrottle:
+    def __init__(self, max_calls: int, window_seconds: float): ...
+    def allow(self) -> bool:
+        """Record and permit a call if under the limit. Thread-safe."""
+```
+
+Implementation: `collections.deque` of monotonic timestamps plus
+`threading.Lock`. Evict entries older than the window on each `allow()`.
+No cross-process coordination; document that limits are per worker.
+
+### Settings
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `EXPLAIN_ERRORS_MAX_CALLS` | `5` | Max explanations per window |
+| `EXPLAIN_ERRORS_WINDOW_SECONDS` | `60` | Window length |
+
+### Middleware changes
+
+- `__init__`: construct the throttle when DEBUG is True; delete `self.api_called`.
+- `process_exception`: gate the OpenAI call on `self.throttle.allow()`.
+  When throttled, skip the call silently (no print spam) and return the same
+  JsonResponse with `"message": None`.
+- Async path unchanged: `process_exception` still runs via `sync_to_async`,
+  and the lock makes the throttle safe under threaded execution.
+
+## 3. Test Plan
+
+New file `tests/test_sanitize.py`:
+- each default pattern redacts (secret assignment, bearer token, email)
+- non-sensitive text passes through unchanged
+- custom pattern from settings is applied
+- `EXPLAIN_ERRORS_REDACT_DISABLE_DEFAULTS=True` skips defaults
+- invalid custom regex is skipped without raising
+
+New file `tests/test_throttle.py`:
+- allows up to `max_calls` within the window, denies the next
+- allows again after the window expires (inject a fake clock or monkeypatch
+  `time.monotonic`)
+- thread-safety smoke test: concurrent `allow()` calls never exceed the limit
+
+Updates to `tests/test_middleware.py` (mock the OpenAI client throughout):
+- sanitized traceback reaches the prompt (assert `[REDACTED]` present, secret absent)
+- throttled request returns 500 JsonResponse without calling the client
+- both sync and async paths respect the throttle
+- DEBUG=False still bypasses everything
+
+Test command: `DJANGO_SETTINGS_MODULE=test_settings python -m django test tests -v 2`
+
+## 4. Post-merge: promote to CLAUDE.md
+
+Add under project invariants:
+- "All externally transmitted or persistently indexed traceback text must
+  pass through `explain_errors.sanitize.sanitize_traceback()`. This includes
+  the future RAG index build."
+- The six new `EXPLAIN_ERRORS_*` / throttle settings and their defaults.
+
+## 5. Out of scope, deferred to rag-layer
+
+The RAG `build_error_index` command will import `sanitize_traceback` and
+apply it before embedding. No RAG code changes in this task.
