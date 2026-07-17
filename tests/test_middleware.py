@@ -55,16 +55,31 @@ class ExplainErrorsMiddlewareTest(SimpleTestCase):
         self.assertEqual(response.status_code, 500)
         self.assertIn("error", json.loads(response.content))
 
-    def test_api_called_flag_prevents_second_call(self):
+    @override_settings(EXPLAIN_ERRORS_MAX_CALLS=1)
+    def test_throttle_blocks_calls_past_the_limit(self):
         request = self.factory.get("/")
         middleware = self._build(lambda request: None)
 
         middleware.process_exception(request, Exception("Test"))
-        self.assertTrue(middleware.api_called)
+        self.assertEqual(self.client.chat.completions.create.call_count, 1)
 
         resp = middleware.process_exception(request, Exception("Test"))
         self.assertEqual(self.client.chat.completions.create.call_count, 1)
         self.assertEqual(resp.status_code, 500)
+        self.assertIsNone(json.loads(resp.content)["message"])
+
+    def test_sanitized_traceback_reaches_prompt(self):
+        request = self.factory.get("/")
+        middleware = self._build(lambda request: None)
+
+        try:
+            raise ValueError("password=hunter2")
+        except ValueError as exc:
+            middleware.process_exception(request, exc)
+
+        prompt = self.client.chat.completions.create.call_args.kwargs["messages"][1]["content"]
+        self.assertIn("[REDACTED]", prompt)
+        self.assertNotIn("hunter2", prompt)
 
     # ---- sync request path ----
     def test_sync_passthrough(self):
@@ -108,6 +123,21 @@ class ExplainErrorsMiddlewareAsyncTest(SimpleTestCase):
         self.assertIsInstance(resp, JsonResponse)
         self.assertEqual(resp.status_code, 500)
         self.assertIn("error", json.loads(resp.content))
+
+    @override_settings(EXPLAIN_ERRORS_MAX_CALLS=1)
+    async def test_async_path_respects_throttle(self):
+        async def boom(r):
+            raise ValueError("async boom")
+
+        mw = ExplainErrorsMiddleware(boom)
+
+        await mw(self.factory.get("/"))
+        self.assertEqual(self.client.chat.completions.create.call_count, 1)
+
+        resp = await mw(self.factory.get("/"))
+        self.assertEqual(self.client.chat.completions.create.call_count, 1)
+        self.assertEqual(resp.status_code, 500)
+        self.assertIsNone(json.loads(resp.content)["message"])
 
 
 @override_settings(DEBUG=False)

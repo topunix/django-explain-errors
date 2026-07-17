@@ -8,6 +8,9 @@ from django.conf import settings
 from django.http import JsonResponse
 from asgiref.sync import sync_to_async
 
+from .sanitize import sanitize_traceback
+from .throttle import SlidingWindowThrottle
+
 
 class ExplainErrorsMiddleware:
     """
@@ -22,10 +25,14 @@ class ExplainErrorsMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
         self._is_async = asyncio.iscoroutinefunction(get_response)
-        self.api_called = False
         self.openai_client = None
+        self.throttle = None
 
         if settings.DEBUG:
+            max_calls = getattr(settings, "EXPLAIN_ERRORS_MAX_CALLS", 5)
+            window_seconds = getattr(settings, "EXPLAIN_ERRORS_WINDOW_SECONDS", 60)
+            self.throttle = SlidingWindowThrottle(max_calls, window_seconds)
+
             # Load environment variables from .env file
             load_dotenv()
             # Get the OpenAI API key from environment variable (or settings)
@@ -74,13 +81,16 @@ class ExplainErrorsMiddleware:
             return None
 
         explanation = None
-        if not self.api_called:
+        if self.throttle.allow():
             # Get the exception traceback, trimmed to the most recent frames to
             # cap token usage and stay within the model's context window.
             tb = traceback.format_exc()
             max_tb_chars = getattr(settings, "OPENAI_MAX_TRACEBACK_CHARS", 3000)
             if len(tb) > max_tb_chars:
                 tb = "...(truncated)...\n" + tb[-max_tb_chars:]
+            # Sanitize the exact payload that ships, after truncation so we
+            # don't waste work redacting frames that get discarded.
+            tb = sanitize_traceback(tb)
             # Construct the prompt
             prompt = f"Explain the following Django error in simple terms:\n\n{tb}"
 
@@ -98,7 +108,6 @@ class ExplainErrorsMiddleware:
 
                 # Print the explanation to stdout
                 print("Error Explanation by OpenAI:\n", explanation)
-                self.api_called = True  # Set flag after the call
             except Exception as e:
                 # If the OpenAI call fails, surface the failure but still return
                 # a 500 so the request lifecycle completes cleanly.

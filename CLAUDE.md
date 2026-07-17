@@ -11,6 +11,10 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
 ## Layout
 
 - `explain_errors/middleware.py`: the middleware (sync + async paths)
+- `explain_errors/sanitize.py`: `sanitize_traceback()` — redacts secrets/PII
+  before a traceback leaves the process
+- `explain_errors/throttle.py`: `SlidingWindowThrottle` — in-process, per-worker
+  call-rate limiter used by the middleware
 - `tests/`: unittest-based suite (Django `SimpleTestCase`,
   `IsolatedAsyncioTestCase`, `unittest.mock`, `override_settings`)
 - `setup.py`: packaging metadata
@@ -19,7 +23,7 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
 ## Commands
 
 - Run tests: `DJANGO_SETTINGS_MODULE=test_settings python -m django test tests -v 2`
-- All existing tests (13) must pass before any commit. Never delete or
+- All existing tests (28) must pass before any commit. Never delete or
   weaken an existing test to make a change pass.
 
 ## Invariants (do not break)
@@ -37,12 +41,28 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
 5. New features must be opt-in via settings flags. Default behavior for
    existing users must not change.
 6. Supported: Python 3.9+, Django 4.2+.
+7. All externally transmitted or persistently indexed traceback text must
+   pass through `explain_errors.sanitize.sanitize_traceback()`. This
+   includes the future RAG index build. Apply it to the truncated payload
+   (post `OPENAI_MAX_TRACEBACK_CHARS`), not the raw traceback.
+8. Rate limiting is per-worker-process only (`SlidingWindowThrottle`, no
+   cross-process coordination). Settings:
 
-## Known open question
+   | Setting | Default | Purpose |
+   |---|---|---|
+   | `EXPLAIN_ERRORS_MAX_CALLS` | `5` | Max explanations per window |
+   | `EXPLAIN_ERRORS_WINDOW_SECONDS` | `60` | Window length |
+   | `EXPLAIN_ERRORS_REDACT_PATTERNS` | `[]` | Extra regex strings, appended after defaults |
+   | `EXPLAIN_ERRORS_REDACT_REPLACEMENT` | `"[REDACTED]"` | Replacement token |
+   | `EXPLAIN_ERRORS_REDACT_DISABLE_DEFAULTS` | `False` | Escape hatch; user patterns only |
 
-The `api_called` flag currently limits explanations to the first error per
-worker process. Its intended scope is undecided. Do not silently change
-this behavior; flag it if a task touches it.
+## Resolved: `api_called` scope
+
+Previously an open question (single-explanation-per-worker flag with
+undecided scope). Resolved 2026-07-17: removed in favor of
+`SlidingWindowThrottle` — intended behavior is "limit API spend," not
+"explain exactly one error per worker lifetime." See
+`docs/hardening-design.md.` for the full rationale.
 
 ## Style
 
