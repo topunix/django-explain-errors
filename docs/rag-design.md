@@ -49,7 +49,9 @@ suggested .gitignore entry in the README.
 2. Chunk Python files by top-level function/class using `ast`, falling
    back to fixed-size line windows (80 lines, 20 overlap) for other files.
 3. Store per chunk: file path, start line, end line, chunk text,
-   embedding vector.
+   embedding vector. Sanitize chunk text with `sanitize_traceback()`
+   before embedding and storage, so secrets in source files never
+   reach the API or the index.
 4. Embed via the OpenAI embeddings API using the existing API key
    resolution logic. Batch requests.
 5. Command is idempotent: rebuilding replaces the index atomically
@@ -63,6 +65,9 @@ suggested .gitignore entry in the README.
    of frames inside the project (skip site-packages and stdlib frames).
 2. Build the retrieval query from the exception type, message, and the
    source lines of the innermost project frame.
+2b. Pass the retrieval query through
+    `explain_errors.sanitize.sanitize_traceback()` before embedding.
+    Nothing derived from a traceback leaves the process unsanitized.
 3. Embed the query, retrieve top-k chunks, deduplicate by file path.
 4. Inject into the prompt under a clearly delimited section:
    "Relevant project source:" with file path and line range headers per
@@ -97,7 +102,7 @@ Mock all OpenAI calls (embeddings and chat). Cover at minimum:
 6. Async: RAG retrieval works under `IsolatedAsyncioTestCase` with an
    async get_response chain.
 
-All 13 existing tests must remain green and unmodified.
+All 28 existing tests must remain green and unmodified.
 
 ## README updates
 
