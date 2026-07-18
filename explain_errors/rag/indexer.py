@@ -3,6 +3,7 @@ import ast
 import os
 
 from django.conf import settings
+from dotenv import load_dotenv
 
 from ..sanitize import sanitize_traceback
 from .store import VectorStore
@@ -62,6 +63,7 @@ def get_embed_model():
 
 
 def get_openai_client():
+    load_dotenv()
     from openai import OpenAI
 
     api_key = os.getenv("OPENAI_API_KEY", getattr(settings, "OPENAI_API_KEY", None))

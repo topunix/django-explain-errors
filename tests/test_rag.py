@@ -20,6 +20,7 @@ from explain_errors.rag.indexer import (
     chunk_python_text,
     discover_files,
     get_exclude_dirs,
+    get_openai_client,
 )
 from explain_errors.rag.retriever import extract_project_frames, retrieve_chunks
 from explain_errors.rag.store import VectorStore
@@ -36,6 +37,14 @@ requires_sqlite_vec = unittest.skipUnless(
 )
 
 TESTS_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+
+def test_get_openai_client_loads_dotenv(self):
+    with patch("explain_errors.rag.indexer.load_dotenv") as mock_load:
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "sk-test"}):
+            get_openai_client()
+    mock_load.assert_called_once()
 
 
 def _mock_openai():
