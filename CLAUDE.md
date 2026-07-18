@@ -10,6 +10,8 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
 
 ## Layout
 
+- `explain_errors/rag/`: opt-in RAG layer (store.py, indexer.py, retriever.py)
+- `explain_errors/management/commands/build_error_index.py`: index build command
 - `explain_errors/middleware.py`: the middleware (sync + async paths)
 - `explain_errors/sanitize.py`: `sanitize_traceback()` — redacts secrets/PII
   before a traceback leaves the process
@@ -38,6 +40,11 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
    `settings.OPENAI_API_KEY`. Never log or print the key.
 4. Existing settings must keep working unchanged: `OPENAI_MODEL`,
    `OPENAI_TIMEOUT`, `OPENAI_MAX_TOKENS`, `OPENAI_MAX_TRACEBACK_CHARS`.
+RAG settings (all optional, see docs/rag-design.md):
+- `EXPLAIN_ERRORS_RAG_ENABLED` (default False)
+- `EXPLAIN_ERRORS_RAG_INDEX_PATH`, `EXPLAIN_ERRORS_RAG_TOP_K`,
+  `EXPLAIN_ERRORS_RAG_EMBED_MODEL`, `EXPLAIN_ERRORS_RAG_INCLUDE`,
+  `EXPLAIN_ERRORS_RAG_EXCLUDE`, `EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS`
 5. New features must be opt-in via settings flags. Default behavior for
    existing users must not change.
 6. Supported: Python 3.9+, Django 4.2+.
@@ -55,6 +62,15 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
    | `EXPLAIN_ERRORS_REDACT_PATTERNS` | `[]` | Extra regex strings, appended after defaults |
    | `EXPLAIN_ERRORS_REDACT_REPLACEMENT` | `"[REDACTED]"` | Replacement token |
    | `EXPLAIN_ERRORS_REDACT_DISABLE_DEFAULTS` | `False` | Escape hatch; user patterns only |
+
+9. RAG is opt-in and default-off. With `EXPLAIN_ERRORS_RAG_ENABLED=False`,
+   the prompt must remain byte-identical to the traceback-only prompt.
+10. All text derived from tracebacks or project source must pass through
+   `explain_errors.sanitize.sanitize_traceback()` before being embedded,
+   stored in the index, or sent to any API.
+11. sqlite-vec is an optional dependency (`[rag]` extra). Core imports must
+   never require it; RAG failures log one warning and fall back to the
+   traceback-only prompt. RAG tests skip when it is absent.
 
 ## Resolved: `api_called` scope
 
