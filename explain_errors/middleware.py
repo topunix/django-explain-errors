@@ -1,5 +1,6 @@
 import os
 import asyncio
+import logging
 import traceback
 
 from openai import OpenAI
@@ -10,6 +11,9 @@ from asgiref.sync import sync_to_async
 
 from .sanitize import sanitize_traceback
 from .throttle import SlidingWindowThrottle
+from .rag.retriever import format_chunks_for_prompt, retrieve_chunks
+
+logger = logging.getLogger(__name__)
 
 
 class ExplainErrorsMiddleware:
@@ -91,8 +95,29 @@ class ExplainErrorsMiddleware:
             # Sanitize the exact payload that ships, after truncation so we
             # don't waste work redacting frames that get discarded.
             tb = sanitize_traceback(tb)
+
             # Construct the prompt
             prompt = f"Explain the following Django error in simple terms:\n\n{tb}"
+
+            # RAG: ground the explanation in the user's own project source.
+            # Opt-in and must never break the traceback-only path, so any
+            # failure here is logged and swallowed.
+            if getattr(settings, "EXPLAIN_ERRORS_RAG_ENABLED", False):
+                try:
+                    chunks = retrieve_chunks(exception)
+                    max_prompt_chars = getattr(
+                        settings, "EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS", 6000
+                    )
+                    remaining_chars = max(max_prompt_chars - len(tb), 0)
+                    rag_section = format_chunks_for_prompt(chunks, remaining_chars)
+                    if rag_section:
+                        prompt += f"\n\n{rag_section}"
+                except Exception as exc:
+                    logger.warning(
+                        "explain_errors: RAG retrieval failed, falling back to "
+                        "traceback-only prompt: %s",
+                        exc,
+                    )
 
             try:
                 # Call OpenAI API

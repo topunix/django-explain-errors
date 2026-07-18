@@ -22,6 +22,11 @@ setup(
         'python-dotenv>=1.0',
         'asgiref>=3.6',
     ],
+    extras_require={
+        'rag': [
+            'sqlite-vec>=0.1.0',
+        ],
+    },
     url='https://github.com/topunix/django-explain-errors',
     author='topunix',
     author_email='topunixguy@gmail.com',
