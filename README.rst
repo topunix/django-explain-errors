@@ -1,15 +1,18 @@
 # Django Explain Errors Middleware
 
-This Django middleware captures errors and exceptions, sends them to OpenAI for explanation, and prints the explanation to stdout when debug mode is enabled. It uses an environment variable to securely manage the OpenAI API key.
+This Django middleware captures errors and exceptions, sends them to OpenAI for explanation, and prints the explanation to stdout when debug mode is enabled. It can optionally ground explanations in your own project source code using a local vector index (RAG), so explanations reference the actual code that failed instead of staying generic.
 
-The middleware supports both synchronous (WSGI) and asynchronous (ASGI) views. It auto-detects the view chain at startup and routes requests through the matching sync or async path, so no extra configuration is required to use it under either server type.
+The middleware supports both synchronous (WSGI) and asynchronous (ASGI) views. It auto-detects the view chain at startup and routes requests through the matching sync or async path, so no extra configuration is required to use it under either server type. Tracebacks are sanitized before leaving the process, and API calls are rate limited. It uses an environment variable to securely manage the OpenAI API key.
 
 ## Features
 
 - Captures Django errors and exceptions
 - Uses OpenAI to explain the error
-- Securely manages the OpenAI API key using environment variables
+- Optional codebase-aware explanations (RAG) backed by a local sqlite-vec index (see the RAG section below)
+- Redacts secrets, tokens, and emails from tracebacks before sending
+- Rate limits API calls with a configurable sliding window
 - Works with both sync (WSGI) and async (ASGI) views
+- Securely manages the OpenAI API key using environment variables
 
 ## Installation
 
