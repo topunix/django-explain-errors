@@ -4,7 +4,7 @@ import logging
 import traceback
 
 from openai import OpenAI
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from django.conf import settings
 from django.http import JsonResponse
 from asgiref.sync import sync_to_async
@@ -38,7 +38,7 @@ class ExplainErrorsMiddleware:
             self.throttle = SlidingWindowThrottle(max_calls, window_seconds)
 
             # Load environment variables from .env file
-            load_dotenv()
+            load_dotenv(find_dotenv(usecwd=True))
             # Get the OpenAI API key from environment variable (or settings)
             openai_api_key = os.getenv(
                 "OPENAI_API_KEY", getattr(settings, "OPENAI_API_KEY", None)
