@@ -74,3 +74,4 @@ cython_debug/
 # VS Code
 .vscode/
 .claude/
+.explain_errors_index.db
