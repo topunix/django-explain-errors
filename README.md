@@ -138,6 +138,8 @@ If RAG is enabled but the index is missing, `sqlite-vec` isn't installed, or
 retrieval fails for any reason, the middleware logs a warning and falls back
 to the traceback-only prompt — it never breaks error reporting.
 
+RAG-grounded explanations tend to be longer than traceback-only ones. Consider raising `OPENAI_MAX_TOKENS` (for example to 500) when RAG is enabled so explanations are not truncated.
+
 ### .gitignore
 
 The index file is a local build artifact, not something to commit. Add it
