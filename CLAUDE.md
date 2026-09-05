@@ -25,7 +25,7 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
 ## Commands
 
 - Run tests: `DJANGO_SETTINGS_MODULE=test_settings python -m django test tests -v 2`
-- All existing tests (28) must pass before any commit. Never delete or
+- All existing tests (48) must pass before any commit. Never delete or
   weaken an existing test to make a change pass.
 
 ## Invariants (do not break)
@@ -63,12 +63,17 @@ RAG settings (all optional, see docs/rag-design.md):
    | `EXPLAIN_ERRORS_REDACT_REPLACEMENT` | `"[REDACTED]"` | Replacement token |
    | `EXPLAIN_ERRORS_REDACT_DISABLE_DEFAULTS` | `False` | Escape hatch; user patterns only |
 
-9. RAG is opt-in and default-off. With `EXPLAIN_ERRORS_RAG_ENABLED=False`,
+9. Management commands must catch OpenAI API errors (`openai.OpenAIError`)
+   in `handle()` and raise `CommandError` with a one-line actionable
+   message (nonzero exit). A raw API traceback from a command is a bug.
+   The middleware's never-raise rule applies to the request path and RAG
+   retrieval only; commands should fail loudly but cleanly.
+10. RAG is opt-in and default-off. With `EXPLAIN_ERRORS_RAG_ENABLED=False`,
    the prompt must remain byte-identical to the traceback-only prompt.
-10. All text derived from tracebacks or project source must pass through
+11. All text derived from tracebacks or project source must pass through
    `explain_errors.sanitize.sanitize_traceback()` before being embedded,
    stored in the index, or sent to any API.
-11. sqlite-vec is an optional dependency (`[rag]` extra). Core imports must
+12. sqlite-vec is an optional dependency (`[rag]` extra). Core imports must
    never require it; RAG failures log one warning and fall back to the
    traceback-only prompt. RAG tests skip when it is absent.
 
