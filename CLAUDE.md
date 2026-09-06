@@ -25,7 +25,7 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
 ## Commands
 
 - Run tests: `DJANGO_SETTINGS_MODULE=test_settings python -m django test tests -v 2`
-- All existing tests (48) must pass before any commit. Never delete or
+- All existing tests (53) must pass before any commit. Never delete or
   weaken an existing test to make a change pass.
 
 ## Invariants (do not break)
@@ -39,7 +39,11 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
 3. OpenAI API key resolution order: `OPENAI_API_KEY` env var, then
    `settings.OPENAI_API_KEY`. Never log or print the key.
 4. Existing settings must keep working unchanged: `OPENAI_MODEL`,
-   `OPENAI_TIMEOUT`, `OPENAI_MAX_TOKENS`, `OPENAI_MAX_TRACEBACK_CHARS`.
+   `OPENAI_TIMEOUT`, `OPENAI_MAX_TOKENS`, `OPENAI_MAX_TRACEBACK_CHARS`,
+   `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` (default `False`; when `True`,
+   `process_exception()` still prints the stdout explanation but returns
+   `None` so the handler re-raises the original exception instead of
+   returning a JSON 500).
 RAG settings (all optional, see docs/rag-design.md):
 - `EXPLAIN_ERRORS_RAG_ENABLED` (default False)
 - `EXPLAIN_ERRORS_RAG_INDEX_PATH`, `EXPLAIN_ERRORS_RAG_TOP_K`,

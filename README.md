@@ -52,7 +52,7 @@ pip install django-explain-errors
 
 2. **Trigger an error in your Django application**:
 
-   The middleware will capture the error, send it to OpenAI for explanation, and print the explanation to stdout. When an exception is caught, it returns a JSON `500` response containing the error message and the explanation.
+   The middleware will capture the error, send it to OpenAI for explanation, and print the explanation to stdout. When an exception is caught, it returns a JSON `500` response containing the error message and the explanation. Set `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = True` to keep the stdout explanation while letting Django render its standard debug page instead.
 
 ## Async Support
 
@@ -73,6 +73,7 @@ No additional settings are needed. Place the middleware last in `MIDDLEWARE` for
 | `OPENAI_MAX_TOKENS` | No | Maximum tokens in the explanation. Defaults to `150`. |
 | `OPENAI_TIMEOUT` | No | Request timeout in seconds for the OpenAI client. Defaults to `10`. |
 | `OPENAI_MAX_TRACEBACK_CHARS` | No | Traceback is trimmed to its last N characters before being sent. Defaults to `3000`. |
+| `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` | No | When True, the middleware prints the explanation to stdout and re-raises the exception so Django renders its standard debug page instead of a JSON 500. Defaults to False. |
 
 ## Codebase-aware explanations (RAG)
 

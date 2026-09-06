@@ -148,6 +148,74 @@ class ExplainErrorsMiddlewareDebugOffTest(SimpleTestCase):
         mw = ExplainErrorsMiddleware(lambda r: None)
         self.assertIsNone(mw.process_exception(factory.get("/"), Exception("x")))
 
+    def test_debug_false_handler_reraises(self):
+        factory = RequestFactory()
+
+        def boom(r):
+            raise ValueError("boom")
+
+        mw = ExplainErrorsMiddleware(boom)
+        with self.assertRaises(ValueError):
+            mw(factory.get("/"))
+
+
+@override_settings(DEBUG=True, OPENAI_API_KEY="test-key")
+class ExplainErrorsMiddlewarePreserveDebugPageTest(SimpleTestCase):
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.patcher, self.client = _mock_openai()
+        self.addCleanup(self.patcher.stop)
+
+    @override_settings(EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True)
+    def test_preserve_flag_reraises_original_exception_sync(self):
+        def boom(r):
+            raise ValueError("boom")
+
+        mw = ExplainErrorsMiddleware(boom)
+        with self.assertRaises(ValueError) as ctx:
+            mw(self.factory.get("/"))
+        self.assertEqual(str(ctx.exception), "boom")
+
+    @override_settings(EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True)
+    def test_preserve_flag_still_prints_explanation(self):
+        def boom(r):
+            raise ValueError("boom")
+
+        mw = ExplainErrorsMiddleware(boom)
+        with patch("builtins.print") as mock_print:
+            with self.assertRaises(ValueError):
+                mw(self.factory.get("/"))
+        mock_print.assert_any_call("Error Explanation by OpenAI:\n", "Mocked explanation.")
+
+    def test_preserve_flag_default_off_returns_json_500(self):
+        def boom(r):
+            raise ValueError("boom")
+
+        mw = ExplainErrorsMiddleware(boom)
+        resp = mw(self.factory.get("/"))
+        self.assertIsInstance(resp, JsonResponse)
+        self.assertEqual(resp.status_code, 500)
+        self.assertIn("error", json.loads(resp.content))
+
+
+@override_settings(DEBUG=True, OPENAI_API_KEY="test-key", EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True)
+class ExplainErrorsMiddlewarePreserveDebugPageAsyncTest(SimpleTestCase):
+
+    def setUp(self):
+        self.factory = AsyncRequestFactory()
+        self.patcher, self.client = _mock_openai()
+        self.addCleanup(self.patcher.stop)
+
+    async def test_preserve_flag_reraises_original_exception_async(self):
+        async def boom(r):
+            raise ValueError("async boom")
+
+        mw = ExplainErrorsMiddleware(boom)
+        with self.assertRaises(ValueError) as ctx:
+            await mw(self.factory.get("/"))
+        self.assertEqual(str(ctx.exception), "async boom")
+
 
 @override_settings(DEBUG=True, OPENAI_API_KEY="test-key")
 class OpenAICallConfigTest(SimpleTestCase):

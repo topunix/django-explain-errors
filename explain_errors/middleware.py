@@ -67,7 +67,10 @@ class ExplainErrorsMiddleware:
         try:
             response = self.get_response(request)
         except Exception as exception:
-            return self.process_exception(request, exception)
+            response = self.process_exception(request, exception)
+            if response is None:
+                raise
+            return response
         return response
 
     # --------- Async path ----------
@@ -77,7 +80,10 @@ class ExplainErrorsMiddleware:
         except Exception as exception:
             # process_exception performs blocking OpenAI I/O, so run it in a
             # thread to keep the event loop free.
-            return await sync_to_async(self.process_exception)(request, exception)
+            response = await sync_to_async(self.process_exception)(request, exception)
+            if response is None:
+                raise
+            return response
         return response
 
     def process_exception(self, request, exception):
@@ -137,6 +143,9 @@ class ExplainErrorsMiddleware:
                 # If the OpenAI call fails, surface the failure but still return
                 # a 500 so the request lifecycle completes cleanly.
                 print("Failed to get an explanation from OpenAI:", e)
+
+        if getattr(settings, "EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE", False):
+            return None
 
         return JsonResponse(
             {"error": "An error occurred.", "message": explanation}, status=500
