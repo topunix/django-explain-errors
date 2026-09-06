@@ -17,6 +17,17 @@ the matching path, so no extra configuration is required for either server
 type. Tracebacks are sanitized before leaving the process, and API calls are
 rate limited.
 
+## Scope
+
+This package explains errors to a person. The explanation is written for a human reading their
+console during local development, and the output format assumes that reader.
+
+If a coding agent is doing the debugging, it does not need this. Agents read tracebacks directly,
+and tools that expose live runtime state (debugger-over-MCP servers, `mcp-django`) serve that case
+better. This package is not trying to compete there.
+
+Local development only. It requires `DEBUG = True` and is inert otherwise.
+
 ## Features
 
 - Captures Django errors and exceptions
