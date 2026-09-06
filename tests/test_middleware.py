@@ -8,8 +8,14 @@ from explain_errors.middleware import ExplainErrorsMiddleware
 
 
 def _mock_openai():
-    """Return a patch context for OpenAI plus a configured fake client."""
-    patcher = patch("explain_errors.middleware.OpenAI")
+    """Return a patch context for OpenAI plus a configured fake client.
+
+    Patches openai.OpenAI at its source (rather than
+    explain_errors.middleware.OpenAI) because the client is now built by
+    explain_errors.client.get_openai_client(), which imports OpenAI
+    locally inside its function body.
+    """
+    patcher = patch("openai.OpenAI")
     mock_cls = patcher.start()
     client = MagicMock()
     client.chat.completions.create.return_value = MagicMock(
@@ -253,6 +259,6 @@ class OpenAICallConfigTest(SimpleTestCase):
 
     def test_timeout_passed_to_client(self):
         with override_settings(OPENAI_TIMEOUT=7):
-            with patch("explain_errors.middleware.OpenAI") as mock_cls:
+            with patch("openai.OpenAI") as mock_cls:
                 ExplainErrorsMiddleware(lambda r: None)
                 self.assertEqual(mock_cls.call_args.kwargs["timeout"], 7)

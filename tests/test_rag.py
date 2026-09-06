@@ -48,8 +48,14 @@ def test_get_openai_client_loads_dotenv(self):
 
 
 def _mock_openai():
-    """Patch the chat-completion OpenAI client used by the middleware."""
-    patcher = patch("explain_errors.middleware.OpenAI")
+    """Patch the chat-completion OpenAI client used by the middleware.
+
+    Patches openai.OpenAI at its source (rather than
+    explain_errors.middleware.OpenAI) because the client is now built by
+    explain_errors.client.get_openai_client(), which imports OpenAI
+    locally inside its function body.
+    """
+    patcher = patch("openai.OpenAI")
     mock_cls = patcher.start()
     client = MagicMock()
     client.chat.completions.create.return_value = MagicMock(

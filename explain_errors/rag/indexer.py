@@ -3,8 +3,8 @@ import ast
 import os
 
 from django.conf import settings
-from dotenv import load_dotenv, find_dotenv
 
+from ..client import get_openai_client
 from ..sanitize import sanitize_traceback
 from .store import VectorStore
 
@@ -60,19 +60,6 @@ def get_index_path():
 
 def get_embed_model():
     return getattr(settings, "EXPLAIN_ERRORS_RAG_EMBED_MODEL", "text-embedding-3-small")
-
-
-def get_openai_client():
-    load_dotenv(find_dotenv(usecwd=True))
-    from openai import OpenAI
-
-    api_key = os.getenv("OPENAI_API_KEY", getattr(settings, "OPENAI_API_KEY", None))
-    if not api_key:
-        raise ValueError(
-            "OpenAI API key not found. Please set the OPENAI_API_KEY "
-            "environment variable."
-        )
-    return OpenAI(api_key=api_key)
 
 
 def discover_files(include_dirs, exclude_dirs):

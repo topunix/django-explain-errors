@@ -17,6 +17,8 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
   before a traceback leaves the process
 - `explain_errors/throttle.py`: `SlidingWindowThrottle` — in-process, per-worker
   call-rate limiter used by the middleware
+- `explain_errors/client.py`: `get_openai_client()` — shared OpenAI client
+  factory used by both the middleware and the RAG indexer
 - `tests/`: unittest-based suite (Django `SimpleTestCase`,
   `IsolatedAsyncioTestCase`, `unittest.mock`, `override_settings`)
 - `setup.py`: packaging metadata
@@ -25,7 +27,7 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
 ## Commands
 
 - Run tests: `DJANGO_SETTINGS_MODULE=test_settings python -m django test tests -v 2`
-- All existing tests (53) must pass before any commit. Never delete or
+- All existing tests (61) must pass before any commit. Never delete or
   weaken an existing test to make a change pass.
 
 ## Invariants (do not break)
@@ -38,8 +40,13 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
    production.
 3. OpenAI API key resolution order: `OPENAI_API_KEY` env var, then
    `settings.OPENAI_API_KEY`. Never log or print the key.
+   `OPENAI_BASE_URL` follows the same env-then-settings order (default
+   `None`). All OpenAI clients must be constructed via
+   `explain_errors.client.get_openai_client` — no direct `OpenAI(...)`
+   calls elsewhere.
 4. Existing settings must keep working unchanged: `OPENAI_MODEL`,
    `OPENAI_TIMEOUT`, `OPENAI_MAX_TOKENS`, `OPENAI_MAX_TRACEBACK_CHARS`,
+   `OPENAI_BASE_URL`,
    `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` (default `False`; when `True`,
    `process_exception()` still prints the stdout explanation but returns
    `None` so the handler re-raises the original exception instead of

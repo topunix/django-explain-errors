@@ -1,14 +1,12 @@
-import os
 import asyncio
 import logging
 import traceback
 
-from openai import OpenAI
-from dotenv import load_dotenv, find_dotenv
 from django.conf import settings
 from django.http import JsonResponse
 from asgiref.sync import sync_to_async
 
+from .client import get_openai_client
 from .sanitize import sanitize_traceback
 from .throttle import SlidingWindowThrottle
 from .rag.retriever import format_chunks_for_prompt, retrieve_chunks
@@ -37,24 +35,12 @@ class ExplainErrorsMiddleware:
             window_seconds = getattr(settings, "EXPLAIN_ERRORS_WINDOW_SECONDS", 60)
             self.throttle = SlidingWindowThrottle(max_calls, window_seconds)
 
-            # Load environment variables from .env file
-            load_dotenv(find_dotenv(usecwd=True))
-            # Get the OpenAI API key from environment variable (or settings)
-            openai_api_key = os.getenv(
-                "OPENAI_API_KEY", getattr(settings, "OPENAI_API_KEY", None)
-            )
-            if not openai_api_key:
-                raise ValueError(
-                    "OpenAI API key not found. Please set the OPENAI_API_KEY "
-                    "environment variable."
-                )
-
             # Configurable via settings, with sensible defaults.
             self.model = getattr(settings, "OPENAI_MODEL", "gpt-4o-mini")
             self.max_tokens = getattr(settings, "OPENAI_MAX_TOKENS", 150)
             timeout = getattr(settings, "OPENAI_TIMEOUT", 10)
 
-            self.openai_client = OpenAI(api_key=openai_api_key, timeout=timeout)
+            self.openai_client = get_openai_client(timeout=timeout)
 
     def __call__(self, request):
         # Delegate to the async path when wrapped around an async view chain.

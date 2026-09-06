@@ -74,6 +74,21 @@ No additional settings are needed. Place the middleware last in `MIDDLEWARE` for
 | `OPENAI_TIMEOUT` | No | Request timeout in seconds for the OpenAI client. Defaults to `10`. |
 | `OPENAI_MAX_TRACEBACK_CHARS` | No | Traceback is trimmed to its last N characters before being sent. Defaults to `3000`. |
 | `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` | No | When True, the middleware prints the explanation to stdout and re-raises the exception so Django renders its standard debug page instead of a JSON 500. Defaults to False. |
+| `OPENAI_BASE_URL` (env or settings) | No | Base URL for any OpenAI-compatible API (for example Ollama at `http://localhost:11434/v1`). When set, a missing API key is replaced with a placeholder since local servers do not require one. |
+
+## Using local models (Ollama)
+
+Point `OPENAI_BASE_URL` at any OpenAI-compatible server to run explanations
+against a local model instead of the OpenAI API:
+
+```python
+OPENAI_BASE_URL = "http://localhost:11434/v1"
+OPENAI_MODEL = "llama3.1"
+EXPLAIN_ERRORS_RAG_EMBED_MODEL = "nomic-embed-text"
+```
+
+If you use the RAG layer, rebuild the index after changing the embedding
+model or provider. Stored vectors are model-specific.
 
 ## Codebase-aware explanations (RAG)
 
