@@ -18,7 +18,7 @@ setup(
     python_requires='>=3.9',
     install_requires=[
         'Django>=4.2',
-        'openai>=1.0',
+        'openai>=1.0,<4.0',
         'python-dotenv>=1.0',
         'asgiref>=3.6',
     ],
