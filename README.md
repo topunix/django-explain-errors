@@ -1,13 +1,27 @@
 # Django Explain Errors Middleware
 
-This Django middleware captures errors and exceptions, sends them to OpenAI for explanation, and prints the explanation to stdout when debug mode is enabled. It can optionally ground explanations in your own project source code using a local vector index (RAG), so explanations reference the actual code that failed instead of staying generic.
+This Django middleware captures unhandled errors and exceptions, sends them
+to a language model for explanation, and prints the explanation to stdout
+when debug mode is enabled. It works with the OpenAI API out of the box, and
+with any OpenAI-compatible endpoint (Ollama, LM Studio, Azure, or a corporate
+gateway) by setting a base URL, so explanations can run entirely on a local
+model if you prefer not to send code off your machine.
 
-The middleware supports both synchronous (WSGI) and asynchronous (ASGI) views. It auto-detects the view chain at startup and routes requests through the matching sync or async path, so no extra configuration is required to use it under either server type. Tracebacks are sanitized before leaving the process, and API calls are rate limited. It uses an environment variable to securely manage the OpenAI API key.
+It can optionally ground explanations in your own project source using a
+local vector index (RAG), so explanations reference the actual code that
+failed instead of staying generic.
+
+The middleware supports both synchronous (WSGI) and asynchronous (ASGI)
+views. It auto-detects the view chain at startup and routes requests through
+the matching path, so no extra configuration is required for either server
+type. Tracebacks are sanitized before leaving the process, and API calls are
+rate limited.
 
 ## Features
 
 - Captures Django errors and exceptions
-- Uses OpenAI to explain the error
+- Explains errors using OpenAI, or any OpenAI-compatible endpoint (Ollama,
+  LM Studio, Azure, gateways) via `OPENAI_BASE_URL`
 - Optional codebase-aware explanations (RAG) backed by a local sqlite-vec index (see the RAG section below)
 - Redacts secrets, tokens, and emails from tracebacks before sending
 - Rate limits API calls with a configurable sliding window
@@ -39,6 +53,9 @@ pip install django-explain-errors
      ```plaintext
      OPENAI_API_KEY=your_openai_api_key_here
      ```
+
+   The API key is not required if you set `OPENAI_BASE_URL` to a local
+   server such as Ollama, which does not authenticate requests.
 
 ## Usage
 
@@ -87,6 +104,10 @@ OPENAI_MODEL = "llama3.1"
 EXPLAIN_ERRORS_RAG_EMBED_MODEL = "nomic-embed-text"
 ```
 
+With a local endpoint, no traceback or source code leaves your machine,
+which matters if you work somewhere that cannot send code to a
+third-party API.
+
 If you use the RAG layer, rebuild the index after changing the embedding
 model or provider. Stored vectors are model-specific.
 
@@ -122,7 +143,7 @@ python manage.py build_error_index
 This walks your project, chunks Python files by top-level function/class
 (and other text files by fixed-size line windows), embeds each chunk with
 the OpenAI embeddings API, and writes them to a local index file. Re-run it
-whenever your source changes meaningfully — indexing is not automatic.
+whenever your source changes meaningfully. Indexing is not automatic.
 Rebuilding is idempotent: it builds into a temp file and atomically replaces
 the previous index.
 
@@ -152,7 +173,7 @@ your source files are never sent to OpenAI or written to the index.
 
 If RAG is enabled but the index is missing, `sqlite-vec` isn't installed, or
 retrieval fails for any reason, the middleware logs a warning and falls back
-to the traceback-only prompt — it never breaks error reporting.
+to the traceback-only prompt. It never breaks error reporting.
 
 RAG-grounded explanations tend to be longer than traceback-only ones. Consider raising `OPENAI_MAX_TOKENS` (for example to 500) when RAG is enabled so explanations are not truncated.
 
@@ -170,13 +191,13 @@ else.)
 
 ### Before / after
 
-**Without RAG** — traceback only:
+**Without RAG**, traceback only:
 
 > Your `ValueError` is raised because the value passed to `foo()` couldn't
 > be converted to an integer. Check where `foo()` is called and make sure
 > you're passing a numeric string.
 
-**With RAG** — grounded in the actual function:
+**With RAG**, grounded in the actual function:
 
 > In `myapp/utils.py`, `foo()` calls `int(value)` on line 12 without a
 > `try`/`except`, so any non-numeric `value` raises `ValueError` straight
