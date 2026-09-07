@@ -1,0 +1,253 @@
+# django-explain-errors roadmap
+
+## How to read this file
+This file records decisions, not release state, and it is not guaranteed current.
+Before acting on any item, check its "Verify" marker against `main`. If the marker is
+present, the item has shipped and this file is stale; say so and skip it.
+
+State sources:
+- `main` itself, for whether a setting, module, or file exists
+- PyPI: https://pypi.org/pypi/django-explain-errors/json (`info.version`)
+- GitHub releases and tags: `topunix/django-explain-errors`
+
+Deleting shipped items is housekeeping, not correctness. Doing it in the same PR that
+ships the work keeps the file short; skipping it costs one lookup.
+
+Items reference each other by name, never by number, so renumbering stays safe.
+Task specs live in `docs/tasks/` in the repo, versioned, deleted after execution. They do
+not live here and they do not live in `CLAUDE.md`.
+
+## Positioning
+The package is a Django learning aid for humans, not an error explainer for agents.
+Explanations are grounded in the user's own code and (planned) the official Django docs.
+"AI error explainer" is a commoditized category; "grounded Django learning aid" is not.
+Sequencing below follows from that.
+
+## Sequenced queue
+
+1. **preserve-mode-default**: flip `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` to default `True`.
+   Returning a `JsonResponse` from `process_exception` is the single source of every known
+   integration conflict, and preserve mode resolves most of them. Technically breaking, but
+   pre-1.0 with no meaningful install base, so change it and move on.
+
+   Two structural causes:
+   - Installed last in `MIDDLEWARE`, `process_exception` runs first (reverse order) and
+     pre-empts other packages' hooks. Preserve mode returns `None`, so the chain continues.
+   - Returning a response ends exception handling before `got_request_exception` fires,
+     which is what breaks Sentry and Rollbar.
+
+   Compatibility, default mode then preserve mode:
+   - Debug Toolbar: broken (no HTML to inject into), then works.
+   - Sentry, Rollbar: broken (signal never fires), then works.
+   - DRF: partial in both (only unhandled types reach middleware).
+   - runserver_plus, Werkzeug: broken in both. Verify empirically before documenting as
+     unsupported; the expectation is that Django converts the exception to a response
+     before it can reach the Werkzeug middleware.
+   - Silk and profiling panels: timings inflated by the API call in both.
+   - CORS, GZip, WhiteNoise: no interaction in either.
+
+   Ships with:
+   - A README Compatibility section covering the four affected cases, Werkzeug included as
+     explicitly unsupported.
+   - Revisiting the README install instruction. "Install last" is what causes the
+     pre-emption; ordering matters far less once preserve mode is the default.
+   - The README Scope wording correction (see loose ends), since it is the same README pass.
+   - An integration test asserting `got_request_exception` fires in preserve mode and does
+     not fire in default mode. Load-bearing: it is what makes Sentry work, and it is the
+     kind of behavior that regresses silently under refactoring.
+
+   Also ships, unrelated to preserve mode but the same file and the same README pass:
+   - The truncation defect. At `OPENAI_MAX_TOKENS=150` the model is cut mid-sentence in
+     English on default settings, not only in the languages that tokenize worse.
+     `max_tokens` is a hard cut, not an instruction, and the system prompt carried no length
+     constraint, so the model planned a long answer and was guillotined. RAG makes it worse
+     by lengthening the intended answer against the same cap. Fixing the cap alone yields
+     longer rambling; constraining the prompt alone still risks the cut. Both halves ship
+     together.
+   - `OPENAI_MAX_TOKENS` default raised to a generous ceiling rather than a tight fit around
+     the word budget. The cap is billed on tokens generated, not on the ceiling, so unused
+     headroom is free and dynamic expansion at runtime buys nothing. The prompt controls
+     length; the cap only stops runaway generation, which matters most for local models
+     behind `OPENAI_BASE_URL`. Tests assert the cap comfortably exceeds the word budget and
+     that the prompt states that budget, since independent tests of each would not catch
+     drift between them.
+   - `finish_reason == "length"` logs a warning. Truncation was previously silent.
+   - README note: reasoning models behind `OPENAI_BASE_URL` spend the budget on internal
+     reasoning and can return empty content at low caps.
+
+   First in queue: every later item is easier to evaluate once the default path is the one
+   people actually run, and the truncation defect affects every user today.
+   Verify: `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` defaults to `True` and `OPENAI_MAX_TOKENS`
+   defaults above 150, both in `explain_errors/middleware.py` on `main`.
+
+2. **explain-errors-language**: adds `EXPLAIN_ERRORS_LANGUAGE`, default `None` meaning
+   English. One prompt clause, not `gettext`. Django's i18n machinery is for a fixed string
+   set; generated output is unbounded, so translation catalogs are the wrong tool.
+   Prompt must instruct the model to keep exception names, Django and Python identifiers,
+   and code in English so they stay greppable.
+   Do **not** inherit from `LANGUAGE_CODE`: that is the site's audience language, not the
+   maintainer's, and the two diverge routinely.
+   The word budget needs per-language scaling, since Japanese, Korean, Arabic, Hindi, and
+   Thai tokenize far worse than English. That is a different constant per language, not
+   runtime expansion. The generous ceiling from preserve-mode-default already absorbs most
+   of the variance, so this is a refinement rather than a second defect fix.
+   No dependencies, and it does not need the eval harness, since it is a delivery change
+   rather than a claim about output quality.
+   Known limitation to document: small local models behind `OPENAI_BASE_URL` degrade sharply
+   outside English, so quality does not transfer uniformly across the provider matrix.
+   Verify: `EXPLAIN_ERRORS_LANGUAGE` appears in `explain_errors/middleware.py` on `main`.
+
+3. **Eval harness**: fixture set of real tracebacks plus a scored RAG-on vs RAG-off
+   comparison. Currently there is no regression guard on explanation quality, only on
+   plumbing. Load-bearing for django-docs-links, explanation-levels, and debug page
+   injection, not just RAG.
+   Ships with cost and latency instrumentation, since both need the same measurement
+   plumbing and the debug page injection decision depends on the latency numbers.
+   Rejected shape: a harness that only checks the API returned something.
+   Verify: an `evals/` or `tests/evals/` directory exists on `main`.
+
+4. **django-docs-links**: cross-reference explanations to official Django documentation.
+   Ship the cheap version first: a static map of exception type plus context to a docs
+   anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
+   generated prose is not, which matters most for the learning audience and shrinks the
+   hallucination surface.
+   Resolve before starting:
+   - Django docs license terms for redistributing a derived map or index.
+   - Version pinning. URLs carry a version segment, and serving 5.2 links to a user on 4.2
+     is worse than no link.
+   - Translated docs coverage, if explain-errors-language has shipped.
+     `docs.djangoproject.com` has translations with uneven coverage, so a localized link may
+     404 or silently fall back.
+   Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
+
+5. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
+   backed by shipped behavior. Not before. The README documents shipped behavior; anything
+   earlier is a promise that has to be kept.
+   Verify: the README lead paragraph describes a grounded Django learning aid rather than an
+   error explainer.
+
+## Conditional or unscheduled
+
+- **Debug page injection**: append the explanation into the debug page HTML rather than only
+  stdout. Build only if the eval harness shows p50 latency low enough to tolerate.
+
+  The placement argument is sound: when a 500 fires the developer is in the browser, not the
+  terminal, and stdout requires a context switch to a console that may not be visible. The
+  problem is cost. Injecting blocks page render on the API call, taxing the
+  500-fix-reload loop, which is the tightest loop in Django development. Paying seconds to
+  restate a traceback already rendered further down the same page is a bad trade.
+
+  Decision rule, using the eval harness latency instrumentation:
+  - p50 around 1 to 2 seconds: build the blocking version. Simple and worth it.
+  - p50 above roughly 5 seconds: blocking is not viable. Either build the async version
+    (render the page immediately with an empty panel, fill it from a dev-only view over
+    fetch) or cut the item. The async version costs one URL, one view, and some JS.
+
+  Note that the generous token ceiling raises p50 for any given explanation, since tokens
+  are generated serially. Measure after preserve-mode-default has shipped, not before.
+
+  Ship gated behind `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`, default `False`, whichever version
+  is built. Usage then answers whether it was worth building.
+
+  Only inject what stdout cannot already show. Identical text is redundant; explanations
+  grounded in the user's own code via RAG are something the debug page genuinely lacks.
+
+  Implementation is less fragile than it looks. `DEFAULT_EXCEPTION_REPORTER` and
+  `ExceptionReporter.html_template_path` are supported extension points and the package
+  already requires Django 4.2+, so the cheap version is a subclass plus a template override,
+  not surgery.
+  Verify: `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` appears in `explain_errors/` on `main`.
+
+- **dedup-identical-errors**: LRU hash of exception type plus top frame, so repeated
+  identical errors do not burn the sliding-window throttle. Small, slot in anywhere.
+  Verify: an LRU or hash-based seen-errors cache exists in `explain_errors/middleware.py`.
+
+- **explanation-levels**: `eli5` through `senior`. Build only if the eval harness shows the
+  levels genuinely diverge. The real split is intent, not verbosity: a beginner wants the
+  concept, a senior wants cause and fix in two lines. Build as distinct prompts, not a tone
+  dial. Levels multiply the eval matrix, which is a second reason it waits.
+  Verify: `EXPLAIN_ERRORS_LEVEL` appears in `explain_errors/middleware.py` on `main`.
+
+- **CLAUDE.md self-maintenance**: have Claude Code propose its own `CLAUDE.md` updates at the
+  end of each task instead of manual promotion. The stale test count encountered during
+  v0.3.1 is exactly what this prevents. Process change, slot in anywhere.
+  Verify: `CLAUDE.md` on `main` contains an instruction to propose updates to itself at task
+  end.
+
+- **Semantic retrieval over full Django docs**: same pipeline as the source-code index,
+  pointed at a second corpus. Only if the static map in django-docs-links shows people want it.
+  Verify: a second corpus or docs index target exists under `explain_errors/rag/` on `main`.
+
+- **Local embeddings**: sentence-transformers behind an optional extra. Motivated by the
+  privacy argument, not by adding PyTorch to a resume. Depends on `OPENAI_BASE_URL`, which is
+  what makes fully-local operation coherent.
+  Verify: an `extras_require` entry naming sentence-transformers exists in `setup.py`.
+
+## Rejected (recorded so it does not resurface)
+- **Editor extension or MCP server for IDE consumption.** VS Code, PyCharm, and Zed all have
+  integrated terminals, so `runserver` output is already inside the editor. The browser, not
+  the editor, is the surface a developer is on when a 500 fires. A TypeScript extension is a
+  second distribution artifact with its own marketplace listing, release cadence, and
+  compatibility surface, roughly doubling maintenance for a placement improvement. Debug page
+  injection addresses the same problem without a second artifact. The only thing an extension
+  would uniquely provide is a gutter marker on the failing `file:line`. Revisit only if that
+  specific capability is repeatedly requested.
+- **Dynamic `max_tokens` expansion at runtime.** The cap is a ceiling, not an allocation, and
+  billing follows tokens generated, so a generous ceiling is already dynamic and there is
+  nothing to build. All three shapes are worse than raising the default: retrying on
+  `finish_reason == "length"` pays for the truncated output plus the full regeneration and
+  doubles latency on the slowest requests; a continuation call costs two round trips and
+  stitches explanatory prose badly across the boundary; scaling the cap to traceback length is
+  backwards, since a 200-frame traceback usually needs a shorter explanation than a subtle
+  two-frame one.
+
+## Loose ends (not tasks)
+Fold each into whichever branch already touches the relevant file.
+
+- `__acall__` dispatches to `sync_to_async(self.process_exception)` before checking `DEBUG`;
+  the guard is inside `process_exception`. Costs a thread-pool round-trip per exception when
+  the middleware is left installed with `DEBUG=False`. Two-line fix. Was intended to fold into
+  preserve-debug-page and did not, so it still needs a home.
+  Verify: a `DEBUG` check precedes the `sync_to_async(self.process_exception)` call in
+  `explain_errors/middleware.py`.
+- `PLACEHOLDER_API_KEY` substitution in `explain_errors/client.py` is unconditional on
+  `base_url`. It is correct for Ollama and LM Studio, which ignore the key, and wrong for
+  authenticating remote endpoints such as Anthropic or Azure, where it converts a missing key
+  into an opaque 401. Either restrict the placeholder to loopback and private-network hosts,
+  or catch the 401 and raise a message naming `OPENAI_API_KEY`. Folds into whichever branch
+  next touches `client.py`.
+- Anthropic support via `OPENAI_BASE_URL` already works and should be documented. Set
+  `OPENAI_BASE_URL` to `https://api.anthropic.com/v1/`, `OPENAI_API_KEY` to an Anthropic key,
+  and `OPENAI_MODEL` to a Claude model name. The default `OPENAI_MODEL` of `gpt-4o-mini` will
+  404 against Anthropic, so the model setting is mandatory here and the README must say so.
+  Anthropic positions the OpenAI compatibility layer as primarily for testing and comparing
+  model capabilities rather than as a production solution. Acceptable for a dev-only
+  middleware; note the caveat rather than hiding it. The middleware's call shape (single
+  system message, one user message, non-streaming, `max_tokens`, no tools) avoids every
+  documented limitation of the layer. Goes in on the next README touch, alongside the
+  Compatibility section from preserve-mode-default.
+- README Scope section wording: currently reads as ruling out all non-console surfaces, when
+  the intent was to rule out agent consumption only. Editors rendering explanations for a
+  human are in scope. Correction to existing text, not a new claim. Absorbed by
+  preserve-mode-default.
+- `docs/hardening-design.md.` has a trailing dot in the filename.
+  Verify: no file with a trailing dot exists under `docs/` on `main`.
+- `docs/design.md` does not exist on `main`. It was written in a prior session and never
+  committed. Its settings table was flagged as unverified against implementation.
+  Verify: `docs/design.md` exists on `main` and its settings table matches the settings
+  actually read in `explain_errors/`.
+- Tag pushes to `origin` return 403 while branch pushes succeed, likely a `v*` tag ruleset.
+  Not blocking, since releases go through the GitHub Release UI. Only matters if release ever
+  gets scripted.
+  Verify: not applicable. Closes only if release automation is ever built.
+
+## Open strategic questions
+- Provider abstraction beyond OpenAI-compatible endpoints. The Anthropic compatibility layer
+  covers Claude with no Anthropic-specific code, which weakens rather than strengthens the
+  case for a real abstraction. Revisit only if a target provider appears that has no
+  OpenAI-compatible surface.
+- Whether explain-errors-language plus django-docs-links is enough to carry the learning-aid
+  positioning, or whether it needs a third distinguishing feature before the README rewrite
+  is credible.
+
+---
