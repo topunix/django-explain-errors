@@ -30,6 +30,13 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
 - All existing tests (61) must pass before any commit. Never delete or
   weaken an existing test to make a change pass.
 
+## Roadmap
+
+Roadmap lives at `docs/roadmap.md`. Read it before starting a task. It records
+decisions, not release state, and may be stale: check each item's "Verify" marker
+against the current tree before acting on it. When a task ships, delete its entry
+in the same PR that ships it.
+
 ## Invariants (do not break)
 
 1. Middleware must remain both sync and async capable:
