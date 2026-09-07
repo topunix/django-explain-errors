@@ -55,6 +55,10 @@ Sequencing below follows from that.
    - An integration test asserting `got_request_exception` fires in preserve mode and does
      not fire in default mode. Load-bearing: it is what makes Sentry work, and it is the
      kind of behavior that regresses silently under refactoring.
+   - CLAUDE.md invariant 4 updated to `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` default `True`,
+     and invariant 5 amended to record the flip as a named pre-1.0 exception rather than
+     silently weakening the no-default-changes rule. Use option A wording, minus its
+     final sentence.
 
    Also ships, unrelated to preserve mode but the same file and the same README pass:
    - The truncation defect. At `OPENAI_MAX_TOKENS=150` the model is cut mid-sentence in
