@@ -109,6 +109,7 @@ undecided scope). Resolved 2026-07-17: removed in favor of
 - Mock all OpenAI calls in tests. No network calls in the test suite.
 - Keep dependencies minimal; anything heavy must be an optional extra in
   `setup.py` (e.g. `pip install django-explain-errors[rag]`).
+- Do not include the Claude Code session URL in commit messages or PR bodies.
 
 ## Releases
 
