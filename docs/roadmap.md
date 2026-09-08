@@ -105,8 +105,10 @@ Sequencing below follows from that.
    comparison. Currently there is no regression guard on explanation quality, only on
    plumbing. Load-bearing for django-docs-links, explanation-levels, and debug page
    injection, not just RAG.
-   Ships with cost and latency instrumentation, since both need the same measurement
-   plumbing and the debug page injection decision depends on the latency numbers.
+   Ships with cost and latency instrumentation. Latency is not hypothetical: `process_exception`
+   blocks the request path today, so every 500 already waits on the API call. The numbers gate
+   the debug page injection decision and tell you whether the blocking design needs replacing
+   regardless of that item.
    Rejected shape: a harness that only checks the API returned something.
    Verify: an `evals/` or `tests/evals/` directory exists on `main`.
 
@@ -136,22 +138,31 @@ Sequencing below follows from that.
   stdout. Build only if the eval harness shows p50 latency low enough to tolerate.
 
   The placement argument is sound: when a 500 fires the developer is in the browser, not the
-  terminal, and stdout requires a context switch to a console that may not be visible. The
-  problem is cost. Injecting blocks page render on the API call, taxing the
-  500-fix-reload loop, which is the tightest loop in Django development. Paying seconds to
-  restate a traceback already rendered further down the same page is a bad trade.
+  terminal, and stdout requires a context switch to a console that may not be visible.
+
+  The cost is narrower than it first appears. `process_exception` runs synchronously in the
+  request path, so the debug page already does not render until the API call returns, in
+  preserve mode as much as in default mode. That tax is paid today on every 500. Injection
+  adds no new blocking; it only changes the destination of text the developer already waited
+  for. What it adds is the expectation that the wait produced something worth reading on that
+  surface, since text arriving in a terminal the developer is not looking at costs nothing
+  when it is mediocre.
 
   Decision rule, using the eval harness latency instrumentation:
   - p50 around 1 to 2 seconds: build the blocking version. Simple and worth it.
-  - p50 above roughly 5 seconds: blocking is not viable. Either build the async version
-    (render the page immediately with an empty panel, fill it from a dev-only view over
-    fetch) or cut the item. The async version costs one URL, one view, and some JS.
+  - p50 above roughly 5 seconds: the blocking request path is itself the problem, not
+    injection specifically. Fix it at the source (async fill-in, where the page renders
+    immediately with an empty panel filled from a dev-only view over fetch) or accept that
+    the package is slow on every 500 regardless of destination. The async version costs one
+    URL, one view, and some JS, and it fixes the underlying tax rather than only the
+    injection case.
 
-  Note that the generous token ceiling raises p50 for any given explanation, since tokens
-  are generated serially. Measure after preserve-mode-default has shipped, not before.
+  Because the tax is already being paid, the eval harness latency numbers are load-bearing
+  sooner than this item. They measure current behavior, not a hypothetical, and the generous
+  token ceiling from preserve-mode-default raises them.
 
-  Ship gated behind `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`, default `False`, whichever version
-  is built. Usage then answers whether it was worth building.
+  Ship gated behind `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`, default `False`, whichever version is
+  built. Usage then answers whether it was worth building.
 
   Only inject what stdout cannot already show. Identical text is redundant; explanations
   grounded in the user's own code via RAG are something the debug page genuinely lacks.
