@@ -19,8 +19,9 @@ rate limited.
 
 ## Scope
 
-This package explains errors to a person. The explanation is written for a human reading their
-console during local development, and the output format assumes that reader.
+This package explains errors for a person, not for a coding agent to consume
+programmatically. The explanation is written for a human reader — in a terminal, an editor, or
+(in preserve mode) the browser's debug page — and the output format assumes that reader.
 
 If a coding agent is doing the debugging, it does not need this. Agents read tracebacks directly,
 and tools that expose live runtime state (debugger-over-MCP servers, `mcp-django`) serve that case
@@ -48,7 +49,7 @@ pip install django-explain-errors
 
 2. **Add the middleware to your Django project**:
 
-   - Open your `settings.py` file and add the middleware to the `MIDDLEWARE` list. Ensure that the middleware is added last in the list:
+   - Open your `settings.py` file and add the middleware to the `MIDDLEWARE` list:
 
      ```python
      MIDDLEWARE = [
@@ -56,6 +57,15 @@ pip install django-explain-errors
          'explain_errors.middleware.ExplainErrorsMiddleware',
      ]
      ```
+
+     In the default preserve mode, `process_exception` returns `None`, so exception handling
+     continues normally no matter where the middleware sits in the list — it no longer needs
+     to be last to avoid pre-empting other packages' error handling. It still needs to sit
+     close enough to the view that unhandled exceptions actually reach it, before any other
+     middleware that might catch and handle them itself. If you set
+     `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False`, keep it last: returning a response there still
+     ends exception handling early and pre-empts anything above it in the stack (Debug Toolbar,
+     Sentry, Rollbar — see Compatibility below).
 
 3. **Set up environment variables**:
 
@@ -80,7 +90,7 @@ pip install django-explain-errors
 
 2. **Trigger an error in your Django application**:
 
-   The middleware will capture the error, send it to OpenAI for explanation, and print the explanation to stdout. When an exception is caught, it returns a JSON `500` response containing the error message and the explanation. Set `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = True` to keep the stdout explanation while letting Django render its standard debug page instead.
+   The middleware captures the error, sends it to OpenAI for explanation, and prints the explanation to stdout. By default (`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True`), it then lets exception handling continue normally, so Django (or whatever else is watching, such as `runserver_plus` or Sentry — see Compatibility below) renders exactly what it would without this middleware installed. Set `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False` to instead get a JSON `500` response containing the error message and the explanation.
 
 ## Async Support
 
@@ -89,7 +99,34 @@ The middleware exposes both `sync_capable = True` and `async_capable = True`. At
 - Under WSGI (for example `runserver` with sync views), requests flow through the synchronous handler.
 - Under ASGI (for example with async views), requests are awaited through the async handler. The blocking OpenAI call is offloaded with `asgiref.sync.sync_to_async` so the event loop is not blocked.
 
-No additional settings are needed. Place the middleware last in `MIDDLEWARE` for both modes.
+No additional settings are needed. See Installation above for where to place the middleware in `MIDDLEWARE`.
+
+## Compatibility
+
+How this middleware interacts with other error-handling and debugging tools, in the default
+preserve mode and with `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False`:
+
+| Package | Preserve mode (default) | `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False` |
+| ------- | ------------------------ | ------------------------------------------- |
+| Django Debug Toolbar | Works — Django renders its normal debug page, and Debug Toolbar injects into it. | Broken — the JSON 500 response has no HTML to inject into. |
+| Sentry, Rollbar | Work — the exception propagates and Django re-raises it, so `got_request_exception` fires. | Broken — returning a response ends exception handling before `got_request_exception` fires. |
+| Django REST Framework | Partial — only exceptions DRF does not already handle itself reach this middleware. | Partial, same reason. |
+| Silk and other profiling panels | Timings are inflated by the OpenAI call, since `process_exception` blocks the request path. | Same. |
+| CORS, GZip, WhiteNoise | No interaction. | No interaction. |
+| `runserver_plus` / Werkzeug debugger | Works — see below. | Broken — see below. |
+
+### `runserver_plus` and the Werkzeug debugger
+
+Verified empirically against a scratch Django 4.2 project with `django-extensions` installed,
+running `python manage.py runserver_plus`, in both modes.
+
+- **Preserve mode (default)**: the interactive Werkzeug debugger renders. Returning `None`
+  re-raises the original exception, and `runserver_plus` replaces Django's own debug-page
+  renderer with one that re-raises instead, so its Werkzeug wrapper catches it and shows the
+  interactive debugger.
+- **`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False`**: broken. The JSON 500 response ends exception
+  handling before it ever reaches `runserver_plus`'s exception hook, so the Werkzeug debugger
+  never appears.
 
 ## Configuration
 
@@ -98,10 +135,10 @@ No additional settings are needed. Place the middleware last in `MIDDLEWARE` for
 | `OPENAI_API_KEY` (env or settings) | Yes, when `DEBUG=True` | API key used to authenticate with OpenAI. Read first from the environment, then from `settings`. |
 | `DEBUG` | Yes | The middleware is only active when `DEBUG=True`. When `False`, requests pass through untouched. |
 | `OPENAI_MODEL` | No | Model used for explanations. Defaults to `gpt-4o-mini`. |
-| `OPENAI_MAX_TOKENS` | No | Maximum tokens in the explanation. Defaults to `150`. |
+| `OPENAI_MAX_TOKENS` | No | Ceiling on tokens generated for the explanation, not a target — the system prompt itself asks for a concise answer. Defaults to `1000`. |
 | `OPENAI_TIMEOUT` | No | Request timeout in seconds for the OpenAI client. Defaults to `10`. |
 | `OPENAI_MAX_TRACEBACK_CHARS` | No | Traceback is trimmed to its last N characters before being sent. Defaults to `3000`. |
-| `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` | No | When True, the middleware prints the explanation to stdout and re-raises the exception so Django renders its standard debug page instead of a JSON 500. Defaults to False. |
+| `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` | No | When `True` (the default), the middleware prints the explanation to stdout and returns `None`, so exception handling continues normally and Django renders its standard debug page. Set to `False` to instead return a JSON 500 response, which ends exception handling early (see Compatibility above). |
 | `OPENAI_BASE_URL` (env or settings) | No | Base URL for any OpenAI-compatible API (for example Ollama at `http://localhost:11434/v1`). When set, a missing API key is replaced with a placeholder since local servers do not require one. |
 
 ## Using local models (Ollama)
@@ -121,6 +158,39 @@ third-party API.
 
 If you use the RAG layer, rebuild the index after changing the embedding
 model or provider. Stored vectors are model-specific.
+
+## Using Anthropic (Claude) models
+
+Anthropic's Claude models work today through Anthropic's OpenAI-compatible API, with no
+Anthropic-specific code required:
+
+```python
+OPENAI_BASE_URL = "https://api.anthropic.com/v1/"
+OPENAI_API_KEY = "your_anthropic_api_key_here"
+OPENAI_MODEL = "claude-..."  # a current Claude model name
+```
+
+`OPENAI_MODEL` is mandatory here: the default (`gpt-4o-mini`) doesn't exist on Anthropic's API
+and will 404.
+
+Anthropic documents this compatibility layer as intended primarily for testing and comparing
+model capabilities, not as a production integration path. That's an acceptable tradeoff for a
+development-only middleware, but worth knowing going in.
+
+Reasoning models behind `OPENAI_BASE_URL` spend part of the token budget on internal reasoning
+before producing visible output. At a low `OPENAI_MAX_TOKENS`, the budget can be used up by
+reasoning alone, and the explanation comes back empty. Raise `OPENAI_MAX_TOKENS` if you see this.
+
+### A note on API keys and 401s
+
+`explain_errors` reads `OPENAI_API_KEY` (see Configuration above); it does not read
+provider-specific variables such as `ANTHROPIC_API_KEY`. If no key is found and
+`OPENAI_BASE_URL` is set, the client substitutes a placeholder key rather than raising an
+error — a convenience for local servers like Ollama or LM Studio, which ignore the key
+entirely. Against a real remote endpoint such as Anthropic's, that placeholder is sent as-is
+and rejected, so a missing `OPENAI_API_KEY` shows up as an opaque `401 Unauthorized` rather
+than a clear configuration error. If you see a 401 with `OPENAI_BASE_URL` pointed at a remote
+provider, check that `OPENAI_API_KEY` — not a provider-specific variable — is actually set.
 
 ## Codebase-aware explanations (RAG)
 
@@ -186,7 +256,7 @@ If RAG is enabled but the index is missing, `sqlite-vec` isn't installed, or
 retrieval fails for any reason, the middleware logs a warning and falls back
 to the traceback-only prompt. It never breaks error reporting.
 
-RAG-grounded explanations tend to be longer than traceback-only ones. Consider raising `OPENAI_MAX_TOKENS` (for example to 500) when RAG is enabled so explanations are not truncated.
+RAG-grounded explanations tend to be longer than traceback-only ones. The default `OPENAI_MAX_TOKENS` already leaves generous headroom for this, but if you've lowered it, raise it back up when RAG is enabled so explanations are not truncated.
 
 ### .gitignore
 

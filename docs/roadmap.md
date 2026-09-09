@@ -25,66 +25,7 @@ Sequencing below follows from that.
 
 ## Sequenced queue
 
-1. **preserve-mode-default**: flip `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` to default `True`.
-   Returning a `JsonResponse` from `process_exception` is the single source of every known
-   integration conflict, and preserve mode resolves most of them. Technically breaking, but
-   pre-1.0 with no meaningful install base, so change it and move on.
-
-   Two structural causes:
-   - Installed last in `MIDDLEWARE`, `process_exception` runs first (reverse order) and
-     pre-empts other packages' hooks. Preserve mode returns `None`, so the chain continues.
-   - Returning a response ends exception handling before `got_request_exception` fires,
-     which is what breaks Sentry and Rollbar.
-
-   Compatibility, default mode then preserve mode:
-   - Debug Toolbar: broken (no HTML to inject into), then works.
-   - Sentry, Rollbar: broken (signal never fires), then works.
-   - DRF: partial in both (only unhandled types reach middleware).
-   - runserver_plus, Werkzeug: broken in both. Verify empirically before documenting as
-     unsupported; the expectation is that Django converts the exception to a response
-     before it can reach the Werkzeug middleware.
-   - Silk and profiling panels: timings inflated by the API call in both.
-   - CORS, GZip, WhiteNoise: no interaction in either.
-
-   Ships with:
-   - A README Compatibility section covering the four affected cases, Werkzeug included as
-     explicitly unsupported.
-   - Revisiting the README install instruction. "Install last" is what causes the
-     pre-emption; ordering matters far less once preserve mode is the default.
-   - The README Scope wording correction (see loose ends), since it is the same README pass.
-   - An integration test asserting `got_request_exception` fires in preserve mode and does
-     not fire in default mode. Load-bearing: it is what makes Sentry work, and it is the
-     kind of behavior that regresses silently under refactoring.
-   - CLAUDE.md invariant 4 updated to `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` default `True`,
-     and invariant 5 amended to record the flip as a named pre-1.0 exception rather than
-     silently weakening the no-default-changes rule. Use option A wording, minus its
-     final sentence.
-
-   Also ships, unrelated to preserve mode but the same file and the same README pass:
-   - The truncation defect. At `OPENAI_MAX_TOKENS=150` the model is cut mid-sentence in
-     English on default settings, not only in the languages that tokenize worse.
-     `max_tokens` is a hard cut, not an instruction, and the system prompt carried no length
-     constraint, so the model planned a long answer and was guillotined. RAG makes it worse
-     by lengthening the intended answer against the same cap. Fixing the cap alone yields
-     longer rambling; constraining the prompt alone still risks the cut. Both halves ship
-     together.
-   - `OPENAI_MAX_TOKENS` default raised to a generous ceiling rather than a tight fit around
-     the word budget. The cap is billed on tokens generated, not on the ceiling, so unused
-     headroom is free and dynamic expansion at runtime buys nothing. The prompt controls
-     length; the cap only stops runaway generation, which matters most for local models
-     behind `OPENAI_BASE_URL`. Tests assert the cap comfortably exceeds the word budget and
-     that the prompt states that budget, since independent tests of each would not catch
-     drift between them.
-   - `finish_reason == "length"` logs a warning. Truncation was previously silent.
-   - README note: reasoning models behind `OPENAI_BASE_URL` spend the budget on internal
-     reasoning and can return empty content at low caps.
-
-   First in queue: every later item is easier to evaluate once the default path is the one
-   people actually run, and the truncation defect affects every user today.
-   Verify: `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` defaults to `True` and `OPENAI_MAX_TOKENS`
-   defaults above 150, both in `explain_errors/middleware.py` on `main`.
-
-2. **explain-errors-language**: adds `EXPLAIN_ERRORS_LANGUAGE`, default `None` meaning
+1. **explain-errors-language**: adds `EXPLAIN_ERRORS_LANGUAGE`, default `None` meaning
    English. One prompt clause, not `gettext`. Django's i18n machinery is for a fixed string
    set; generated output is unbounded, so translation catalogs are the wrong tool.
    Prompt must instruct the model to keep exception names, Django and Python identifiers,
@@ -101,7 +42,7 @@ Sequencing below follows from that.
    outside English, so quality does not transfer uniformly across the provider matrix.
    Verify: `EXPLAIN_ERRORS_LANGUAGE` appears in `explain_errors/middleware.py` on `main`.
 
-3. **Eval harness**: fixture set of real tracebacks plus a scored RAG-on vs RAG-off
+2. **Eval harness**: fixture set of real tracebacks plus a scored RAG-on vs RAG-off
    comparison. Currently there is no regression guard on explanation quality, only on
    plumbing. Load-bearing for django-docs-links, explanation-levels, and debug page
    injection, not just RAG.
@@ -112,7 +53,7 @@ Sequencing below follows from that.
    Rejected shape: a harness that only checks the API returned something.
    Verify: an `evals/` or `tests/evals/` directory exists on `main`.
 
-4. **django-docs-links**: cross-reference explanations to official Django documentation.
+3. **django-docs-links**: cross-reference explanations to official Django documentation.
    Ship the cheap version first: a static map of exception type plus context to a docs
    anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
    generated prose is not, which matters most for the learning audience and shrinks the
@@ -126,7 +67,7 @@ Sequencing below follows from that.
      404 or silently fall back.
    Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
 
-5. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
+4. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
    backed by shipped behavior. Not before. The README documents shipped behavior; anything
    earlier is a promise that has to be kept.
    Verify: the README lead paragraph describes a grounded Django learning aid rather than an
@@ -231,30 +172,23 @@ Fold each into whichever branch already touches the relevant file.
   into an opaque 401. Either restrict the placeholder to loopback and private-network hosts,
   or catch the 401 and raise a message naming `OPENAI_API_KEY`. Folds into whichever branch
   next touches `client.py`.
-- Anthropic support via `OPENAI_BASE_URL` already works and should be documented. Set
-  `OPENAI_BASE_URL` to `https://api.anthropic.com/v1/`, `OPENAI_API_KEY` to an Anthropic key,
-  and `OPENAI_MODEL` to a Claude model name. The default `OPENAI_MODEL` of `gpt-4o-mini` will
-  404 against Anthropic, so the model setting is mandatory here and the README must say so.
-  Anthropic positions the OpenAI compatibility layer as primarily for testing and comparing
-  model capabilities rather than as a production solution. Acceptable for a dev-only
-  middleware; note the caveat rather than hiding it. The middleware's call shape (single
-  system message, one user message, non-streaming, `max_tokens`, no tools) avoids every
-  documented limitation of the layer. Goes in on the next README touch, alongside the
-  Compatibility section from preserve-mode-default.
-- README Scope section wording: currently reads as ruling out all non-console surfaces, when
-  the intent was to rule out agent consumption only. Editors rendering explanations for a
-  human are in scope. Correction to existing text, not a new claim. Absorbed by
-  preserve-mode-default.
+- The README Configuration table omits `EXPLAIN_ERRORS_MAX_CALLS`,
+  `EXPLAIN_ERRORS_WINDOW_SECONDS`, and the `EXPLAIN_ERRORS_REDACT_*` settings entirely.
+  Missing coverage, not a wrong default. Fold into the next README touch.
+  Verify: `EXPLAIN_ERRORS_MAX_CALLS`, `EXPLAIN_ERRORS_WINDOW_SECONDS`, and the
+  `EXPLAIN_ERRORS_REDACT_*` settings all appear in the README's Configuration table on `main`.
 - `docs/hardening-design.md.` has a trailing dot in the filename.
   Verify: no file with a trailing dot exists under `docs/` on `main`.
 - `docs/design.md` does not exist on `main`. It was written in a prior session and never
   committed. Its settings table was flagged as unverified against implementation.
   Verify: `docs/design.md` exists on `main` and its settings table matches the settings
   actually read in `explain_errors/`.
-- Tag pushes to `origin` return 403 while branch pushes succeed, likely a `v*` tag ruleset.
-  Not blocking, since releases go through the GitHub Release UI. Only matters if release ever
-  gets scripted.
-  Verify: not applicable. Closes only if release automation is ever built.
+- Pushes from Claude Code to `origin` return 403 for tag creation and branch deletion, while
+  branch creation and updates succeed. Likely a ruleset on ref deletion plus a `v*` tag rule.
+  Not blocking, since releases go through the GitHub Release UI. Only matters if release or
+  cleanup is ever scripted.
+  Verify: not applicable. Closes only if release automation or scripted branch cleanup is
+  ever built.
 
 ## Open strategic questions
 - Provider abstraction beyond OpenAI-compatible endpoints. The Anthropic compatibility layer
