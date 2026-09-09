@@ -291,6 +291,7 @@ class MiddlewareRagIntegrationTest(SimpleTestCase):
         self.assertEqual(prompt, expected)
         self.assertNotIn("Relevant project source:", prompt)
 
+    @override_settings(EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False)
     def test_fallback_when_index_file_missing(self):
         with override_settings(
             EXPLAIN_ERRORS_RAG_ENABLED=True,
@@ -305,6 +306,7 @@ class MiddlewareRagIntegrationTest(SimpleTestCase):
         prompt = self.client.chat.completions.create.call_args.kwargs["messages"][1]["content"]
         self.assertNotIn("Relevant project source:", prompt)
 
+    @override_settings(EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False)
     def test_fallback_when_sqlite_vec_import_fails(self):
         with tempfile.TemporaryDirectory() as tmp:
             index_path = os.path.join(tmp, "index.db")
@@ -330,6 +332,7 @@ class MiddlewareRagIntegrationTest(SimpleTestCase):
         self.assertNotIn("Relevant project source:", prompt)
 
     @requires_sqlite_vec
+    @override_settings(EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False)
     def test_fallback_when_retrieval_raises(self):
         with tempfile.TemporaryDirectory() as tmp:
             index_path = self._build_fixture_index(tmp)
@@ -376,6 +379,7 @@ class MiddlewareRagAsyncTest(SimpleTestCase):
             with override_settings(
                 EXPLAIN_ERRORS_RAG_ENABLED=True,
                 EXPLAIN_ERRORS_RAG_INDEX_PATH=index_path,
+                EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False,
             ):
                 with patch(
                     "explain_errors.rag.retriever.get_openai_client",

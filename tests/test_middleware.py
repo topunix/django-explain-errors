@@ -4,7 +4,7 @@ from unittest.mock import MagicMock, patch
 from django.http import JsonResponse, HttpResponse
 from django.test import SimpleTestCase, RequestFactory, AsyncRequestFactory, override_settings
 
-from explain_errors.middleware import ExplainErrorsMiddleware
+from explain_errors.middleware import DEFAULT_MAX_TOKENS, ExplainErrorsMiddleware
 
 
 def _mock_openai():
@@ -51,6 +51,7 @@ class ExplainErrorsMiddlewareTest(SimpleTestCase):
         self.assertTrue(self._build(aget)._is_async)
 
     # ---- process_exception (original test, adapted) ----
+    @override_settings(EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False)
     def test_process_exception_with_error(self):
         request = self.factory.get("/")
         middleware = self._build(lambda request: None)
@@ -61,7 +62,15 @@ class ExplainErrorsMiddlewareTest(SimpleTestCase):
         self.assertEqual(response.status_code, 500)
         self.assertIn("error", json.loads(response.content))
 
-    @override_settings(EXPLAIN_ERRORS_MAX_CALLS=1)
+    def test_process_exception_with_error_preserve_mode_default(self):
+        request = self.factory.get("/")
+        middleware = self._build(lambda request: None)
+
+        response = middleware.process_exception(request, Exception("Test Exception"))
+
+        self.assertIsNone(response)
+
+    @override_settings(EXPLAIN_ERRORS_MAX_CALLS=1, EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False)
     def test_throttle_blocks_calls_past_the_limit(self):
         request = self.factory.get("/")
         middleware = self._build(lambda request: None)
@@ -73,6 +82,18 @@ class ExplainErrorsMiddlewareTest(SimpleTestCase):
         self.assertEqual(self.client.chat.completions.create.call_count, 1)
         self.assertEqual(resp.status_code, 500)
         self.assertIsNone(json.loads(resp.content)["message"])
+
+    @override_settings(EXPLAIN_ERRORS_MAX_CALLS=1)
+    def test_throttle_blocks_calls_past_the_limit_preserve_mode_default(self):
+        request = self.factory.get("/")
+        middleware = self._build(lambda request: None)
+
+        middleware.process_exception(request, Exception("Test"))
+        self.assertEqual(self.client.chat.completions.create.call_count, 1)
+
+        resp = middleware.process_exception(request, Exception("Test"))
+        self.assertEqual(self.client.chat.completions.create.call_count, 1)
+        self.assertIsNone(resp)
 
     def test_sanitized_traceback_reaches_prompt(self):
         request = self.factory.get("/")
@@ -93,6 +114,7 @@ class ExplainErrorsMiddlewareTest(SimpleTestCase):
         mw = self._build(lambda r: sentinel)
         self.assertIs(mw(self.factory.get("/")), sentinel)
 
+    @override_settings(EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False)
     def test_sync_exception_returns_500(self):
         def boom(r):
             raise ValueError("boom")
@@ -101,6 +123,13 @@ class ExplainErrorsMiddlewareTest(SimpleTestCase):
         self.assertIsInstance(resp, JsonResponse)
         self.assertEqual(resp.status_code, 500)
         self.assertIn("error", json.loads(resp.content))
+
+    def test_sync_exception_reraises_by_default(self):
+        def boom(r):
+            raise ValueError("boom")
+
+        with self.assertRaises(ValueError):
+            self._build(boom)(self.factory.get("/"))
 
 
 @override_settings(DEBUG=True, OPENAI_API_KEY="test-key")
@@ -120,6 +149,7 @@ class ExplainErrorsMiddlewareAsyncTest(SimpleTestCase):
         mw = ExplainErrorsMiddleware(aget)
         self.assertIs(await mw(self.factory.get("/")), sentinel)
 
+    @override_settings(EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False)
     async def test_async_exception_returns_500(self):
         async def boom(r):
             raise ValueError("async boom")
@@ -130,7 +160,15 @@ class ExplainErrorsMiddlewareAsyncTest(SimpleTestCase):
         self.assertEqual(resp.status_code, 500)
         self.assertIn("error", json.loads(resp.content))
 
-    @override_settings(EXPLAIN_ERRORS_MAX_CALLS=1)
+    async def test_async_exception_reraises_by_default(self):
+        async def boom(r):
+            raise ValueError("async boom")
+
+        mw = ExplainErrorsMiddleware(boom)
+        with self.assertRaises(ValueError):
+            await mw(self.factory.get("/"))
+
+    @override_settings(EXPLAIN_ERRORS_MAX_CALLS=1, EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False)
     async def test_async_path_respects_throttle(self):
         async def boom(r):
             raise ValueError("async boom")
@@ -194,7 +232,8 @@ class ExplainErrorsMiddlewarePreserveDebugPageTest(SimpleTestCase):
                 mw(self.factory.get("/"))
         mock_print.assert_any_call("Error Explanation by OpenAI:\n", "Mocked explanation.")
 
-    def test_preserve_flag_default_off_returns_json_500(self):
+    @override_settings(EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False)
+    def test_preserve_flag_explicitly_off_returns_json_500(self):
         def boom(r):
             raise ValueError("boom")
 
@@ -203,6 +242,15 @@ class ExplainErrorsMiddlewarePreserveDebugPageTest(SimpleTestCase):
         self.assertIsInstance(resp, JsonResponse)
         self.assertEqual(resp.status_code, 500)
         self.assertIn("error", json.loads(resp.content))
+
+    def test_preserve_flag_default_reraises_without_override(self):
+        def boom(r):
+            raise ValueError("boom")
+
+        mw = ExplainErrorsMiddleware(boom)
+        with self.assertRaises(ValueError) as ctx:
+            mw(self.factory.get("/"))
+        self.assertEqual(str(ctx.exception), "boom")
 
 
 @override_settings(DEBUG=True, OPENAI_API_KEY="test-key", EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True)
@@ -236,7 +284,7 @@ class OpenAICallConfigTest(SimpleTestCase):
         mw.process_exception(self.factory.get("/"), Exception("x"))
         kwargs = self.client.chat.completions.create.call_args.kwargs
         self.assertEqual(kwargs["model"], "gpt-4o-mini")
-        self.assertEqual(kwargs["max_tokens"], 150)
+        self.assertEqual(kwargs["max_tokens"], DEFAULT_MAX_TOKENS)
 
     @override_settings(OPENAI_MODEL="gpt-5-mini", OPENAI_MAX_TOKENS=50)
     def test_configurable_model_and_tokens(self):

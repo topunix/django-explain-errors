@@ -13,6 +13,18 @@ from .rag.retriever import format_chunks_for_prompt, retrieve_chunks
 
 logger = logging.getLogger(__name__)
 
+EXPLANATION_WORD_BUDGET = 200
+# Generous ceiling, not a target. Billing follows tokens generated, so unused
+# headroom is free. The prompt controls length; this only stops runaway
+# generation, which matters most for local models behind OPENAI_BASE_URL.
+DEFAULT_MAX_TOKENS = 1000
+
+SYSTEM_PROMPT = (
+    "You are a Django expert helping a developer understand an error. "
+    f"Answer in under {EXPLANATION_WORD_BUDGET} words: what went wrong, "
+    "why, and how to fix it. Be concrete and skip preamble."
+)
+
 
 class ExplainErrorsMiddleware:
     """
@@ -37,7 +49,7 @@ class ExplainErrorsMiddleware:
 
             # Configurable via settings, with sensible defaults.
             self.model = getattr(settings, "OPENAI_MODEL", "gpt-4o-mini")
-            self.max_tokens = getattr(settings, "OPENAI_MAX_TOKENS", 150)
+            self.max_tokens = getattr(settings, "OPENAI_MAX_TOKENS", DEFAULT_MAX_TOKENS)
             timeout = getattr(settings, "OPENAI_TIMEOUT", 10)
 
             self.openai_client = get_openai_client(timeout=timeout)
@@ -116,12 +128,17 @@ class ExplainErrorsMiddleware:
                 response = self.openai_client.chat.completions.create(
                     model=self.model,
                     messages=[
-                        {"role": "system", "content": "You are a helpful assistant."},
+                        {"role": "system", "content": SYSTEM_PROMPT},
                         {"role": "user", "content": prompt},
                     ],
                     max_tokens=self.max_tokens,
                 )
                 explanation = response.choices[0].message.content
+                if response.choices[0].finish_reason == "length":
+                    logger.warning(
+                        "explain_errors: explanation truncated by OPENAI_MAX_TOKENS=%s",
+                        self.max_tokens,
+                    )
 
                 # Print the explanation to stdout
                 print("Error Explanation by OpenAI:\n", explanation)
@@ -130,7 +147,7 @@ class ExplainErrorsMiddleware:
                 # a 500 so the request lifecycle completes cleanly.
                 print("Failed to get an explanation from OpenAI:", e)
 
-        if getattr(settings, "EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE", False):
+        if getattr(settings, "EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE", True):
             return None
 
         return JsonResponse(

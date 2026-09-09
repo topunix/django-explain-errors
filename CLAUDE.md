@@ -27,7 +27,7 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
 ## Commands
 
 - Run tests: `DJANGO_SETTINGS_MODULE=test_settings python -m django test tests -v 2`
-- All existing tests (61) must pass before any commit. Never delete or
+- All existing tests (74) must pass before any commit. Never delete or
   weaken an existing test to make a change pass.
 
 ## Roadmap
@@ -54,17 +54,19 @@ in the same PR that ships it.
 4. Existing settings must keep working unchanged: `OPENAI_MODEL`,
    `OPENAI_TIMEOUT`, `OPENAI_MAX_TOKENS`, `OPENAI_MAX_TRACEBACK_CHARS`,
    `OPENAI_BASE_URL`,
-   `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` (default `False`; when `True`,
+   `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` (default `True`; when `True`,
    `process_exception()` still prints the stdout explanation but returns
    `None` so the handler re-raises the original exception instead of
-   returning a JSON 500).
+   returning a JSON 500. Set to `False` to restore the JSON 500 path.)
 RAG settings (all optional, see docs/rag-design.md):
 - `EXPLAIN_ERRORS_RAG_ENABLED` (default False)
 - `EXPLAIN_ERRORS_RAG_INDEX_PATH`, `EXPLAIN_ERRORS_RAG_TOP_K`,
   `EXPLAIN_ERRORS_RAG_EMBED_MODEL`, `EXPLAIN_ERRORS_RAG_INCLUDE`,
   `EXPLAIN_ERRORS_RAG_EXCLUDE`, `EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS`
 5. New features must be opt-in via settings flags. Default behavior for
-   existing users must not change.
+   existing users must not change, with one pre-1.0 exception:
+   `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` flips to default `True` under
+   `preserve-mode-default` (see roadmap).
 6. Supported: Python 3.9+, Django 4.2+.
 7. All externally transmitted or persistently indexed traceback text must
    pass through `explain_errors.sanitize.sanitize_traceback()`. This
