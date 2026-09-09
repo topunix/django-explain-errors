@@ -30,6 +30,16 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
 - All existing tests (74) must pass before any commit. Never delete or
   weaken an existing test to make a change pass.
 
+## Git and PR conventions
+
+- Never include the Claude Code session URL or the "Generated with Claude Code" line in
+  commit messages or PR bodies. The `Co-Authored-By` trailer stays.
+- Start each task on a fresh branch cut from an updated `origin/main`. Never continue on
+  a branch left from a previous session.
+- Signals fired by Django itself (`got_request_exception` and similar) must be tested
+  through a real request cycle via `django.test.Client`, not by calling middleware
+  directly. A direct call passes without exercising the signal at all.
+
 ## Roadmap
 
 Roadmap lives at `docs/roadmap.md`. Read it before starting a task. It records
@@ -111,7 +121,6 @@ undecided scope). Resolved 2026-07-17: removed in favor of
 - Mock all OpenAI calls in tests. No network calls in the test suite.
 - Keep dependencies minimal; anything heavy must be an optional extra in
   `setup.py` (e.g. `pip install django-explain-errors[rag]`).
-- Do not include the Claude Code session URL in commit messages or PR bodies.
 
 ## Releases
 
