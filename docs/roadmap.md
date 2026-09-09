@@ -160,6 +160,20 @@ Sequencing below follows from that.
 ## Loose ends (not tasks)
 Fold each into whichever branch already touches the relevant file.
 
+- No CI test matrix. `setup.py` declares `Django>=4.2` and `python_requires>=3.9`, but the
+  classifiers stop at Django 5.1 and the suite is only run against one Python/Django
+  combination. Django 6.1 requires Python 3.12, so the matrix has to model Python and Django
+  together, not either alone, or it will silently skip the combinations that actually matter.
+  Cheap to add, since the suite is fully mocked and has no network dependency.
+  Verify: a CI workflow running `tests` against more than one Python/Django combination
+  exists under `.github/workflows/` on `main`.
+- Sentry captures a spurious event when the explanation call itself fails (bad key, timeout,
+  unreachable endpoint), via its `httpx` integration instrumenting inside the HTTP client,
+  even though `explain_errors` catches the exception internally and it never becomes an
+  unhandled exception. Documented in the README's Compatibility section. Consider whether the
+  client should suppress or tag this so it doesn't read as an application bug in a
+  Sentry-instrumented project.
+  Verify: not applicable. Closes only if `client.py` is changed to address it.
 - `__acall__` dispatches to `sync_to_async(self.process_exception)` before checking `DEBUG`;
   the guard is inside `process_exception`. Costs a thread-pool round-trip per exception when
   the middleware is left installed with `DEBUG=False`. Two-line fix. Was intended to fold into

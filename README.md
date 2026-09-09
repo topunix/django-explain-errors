@@ -2,10 +2,11 @@
 
 This Django middleware captures unhandled errors and exceptions, sends them
 to a language model for explanation, and prints the explanation to stdout
-when debug mode is enabled. It works with the OpenAI API out of the box, and
-with any OpenAI-compatible endpoint (Ollama, LM Studio, Azure, or a corporate
-gateway) by setting a base URL, so explanations can run entirely on a local
-model if you prefer not to send code off your machine.
+when debug mode is enabled. It works with the OpenAI API out of the box, with
+Anthropic's Claude models through Anthropic's OpenAI-compatible endpoint, and
+with any other OpenAI-compatible endpoint (Ollama, LM Studio, Azure, or a
+corporate gateway) by setting a base URL, so explanations can run entirely on
+a local model if you prefer not to send code off your machine.
 
 It can optionally ground explanations in your own project source using a
 local vector index (RAG), so explanations reference the actual code that
@@ -20,8 +21,8 @@ rate limited.
 ## Scope
 
 This package explains errors for a person, not for a coding agent to consume
-programmatically. The explanation is written for a human reader — in a terminal, an editor, or
-(in preserve mode) the browser's debug page — and the output format assumes that reader.
+programmatically. The explanation is written for a human reader, in a terminal or an editor's
+integrated terminal, and the output format assumes that reader.
 
 If a coding agent is doing the debugging, it does not need this. Agents read tracebacks directly,
 and tools that expose live runtime state (debugger-over-MCP servers, `mcp-django`) serve that case
@@ -32,8 +33,8 @@ Local development only. It requires `DEBUG = True` and is inert otherwise.
 ## Features
 
 - Captures Django errors and exceptions
-- Explains errors using OpenAI, or any OpenAI-compatible endpoint (Ollama,
-  LM Studio, Azure, gateways) via `OPENAI_BASE_URL`
+- Explains errors using OpenAI, Anthropic's Claude models, or any other
+  OpenAI-compatible endpoint (Ollama, LM Studio, Azure, gateways) via `OPENAI_BASE_URL`
 - Optional codebase-aware explanations (RAG) backed by a local sqlite-vec index (see the RAG section below)
 - Redacts secrets, tokens, and emails from tracebacks before sending
 - Rate limits API calls with a configurable sliding window
@@ -113,20 +114,19 @@ preserve mode and with `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False`:
 | Django REST Framework | Partial — only exceptions DRF does not already handle itself reach this middleware. | Partial, same reason. |
 | Silk and other profiling panels | Timings are inflated by the OpenAI call, since `process_exception` blocks the request path. | Same. |
 | CORS, GZip, WhiteNoise | No interaction. | No interaction. |
-| `runserver_plus` / Werkzeug debugger | Works — see below. | Broken — see below. |
+| `runserver_plus` / Werkzeug debugger | Works — returning `None` re-raises the original exception, and `django-extensions` replaces Django's debug-page renderer with one that re-raises instead, so Werkzeug's WSGI wrapper catches it and shows the interactive debugger. | Broken — the JSON 500 response ends exception handling before it reaches `runserver_plus`'s exception hook, so the Werkzeug debugger never appears. |
 
-### `runserver_plus` and the Werkzeug debugger
+Debug Toolbar, Sentry, and Werkzeug were verified empirically, on both Django 4.2 and Django
+6.1, in both modes. DRF, Silk, and CORS/GZip/WhiteNoise are reasoned from the mechanism
+rather than tested.
 
-Verified empirically against a scratch Django 4.2 project with `django-extensions` installed,
-running `python manage.py runserver_plus`, in both modes.
-
-- **Preserve mode (default)**: the interactive Werkzeug debugger renders. Returning `None`
-  re-raises the original exception, and `runserver_plus` replaces Django's own debug-page
-  renderer with one that re-raises instead, so its Werkzeug wrapper catches it and shows the
-  interactive debugger.
-- **`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False`**: broken. The JSON 500 response ends exception
-  handling before it ever reaches `runserver_plus`'s exception hook, so the Werkzeug debugger
-  never appears.
+One additional behavior worth knowing, also verified on both Django versions: when the
+explanation call itself fails (a bad key, a timeout, an unreachable endpoint), a
+Sentry-instrumented project captures a separate event for that failure. `explain_errors`
+catches the exception internally, so it never becomes an unhandled exception, but Sentry's
+`httpx` integration captures it anyway by instrumenting inside the HTTP client library rather
+than relying on `got_request_exception`. That event is unrelated to whatever error the
+developer is actually investigating.
 
 ## Configuration
 
@@ -167,11 +167,14 @@ Anthropic-specific code required:
 ```python
 OPENAI_BASE_URL = "https://api.anthropic.com/v1/"
 OPENAI_API_KEY = "your_anthropic_api_key_here"
-OPENAI_MODEL = "claude-..."  # a current Claude model name
+OPENAI_MODEL = "..."  # see Anthropic's current model list below
 ```
 
 `OPENAI_MODEL` is mandatory here: the default (`gpt-4o-mini`) doesn't exist on Anthropic's API
-and will 404.
+and will 404. Use one of the model names from
+[Anthropic's model overview](https://docs.anthropic.com/en/docs/about-claude/models/overview);
+model names are versioned and retired over time, so check that page rather than relying on a
+name pinned here.
 
 Anthropic documents this compatibility layer as intended primarily for testing and comparing
 model capabilities, not as a production integration path. That's an acceptable tradeoff for a
@@ -249,8 +252,11 @@ EXPLAIN_ERRORS_RAG_ENABLED = True
 | `EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS` | `6000` | Combined character budget for the traceback + retrieved source sections of the prompt. |
 
 Every chunk of source code and every retrieval query is passed through the
-same `sanitize_traceback()` redaction used for tracebacks, so secrets in
-your source files are never sent to OpenAI or written to the index.
+same `sanitize_traceback()` redaction used for tracebacks, which strips
+patterns that look like secrets, tokens, and emails before anything is sent
+to OpenAI or written to the index. It's a pattern-based filter, not a
+guarantee: it catches recognizable secret shapes, not arbitrary sensitive
+data that doesn't match one.
 
 If RAG is enabled but the index is missing, `sqlite-vec` isn't installed, or
 retrieval fails for any reason, the middleware logs a warning and falls back
