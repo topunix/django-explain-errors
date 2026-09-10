@@ -36,6 +36,8 @@ Local development only. It requires `DEBUG = True` and is inert otherwise.
 - Explains errors using OpenAI, Anthropic's Claude models, or any other
   OpenAI-compatible endpoint (Ollama, LM Studio, Azure, gateways) via `OPENAI_BASE_URL`
 - Optional codebase-aware explanations (RAG) backed by a local sqlite-vec index (see the RAG section below)
+- Explanations in your language via `EXPLAIN_ERRORS_LANGUAGE`, with exception names,
+  identifiers, and code kept in English
 - Redacts secrets, tokens, and emails from tracebacks before sending
 - Rate limits API calls with a configurable sliding window
 - Works with both sync (WSGI) and async (ASGI) views
@@ -135,7 +137,7 @@ developer is actually investigating.
 | `OPENAI_API_KEY` (env or settings) | Yes, unless `OPENAI_BASE_URL` points at an endpoint that does not authenticate | API key used to authenticate with the configured endpoint. Read first from the environment, then from `settings`. |
 | `DEBUG` | Yes | The middleware is only active when `DEBUG=True`. When `False`, requests pass through untouched. |
 | `OPENAI_MODEL` | No | Model used for explanations. Defaults to `gpt-4o-mini`. |
-| `OPENAI_MAX_TOKENS` | No | Ceiling on tokens generated for the explanation, not a target — the system prompt itself asks for a concise answer. Defaults to `1000`. |
+| `OPENAI_MAX_TOKENS` | No | Ceiling on tokens generated for the explanation, not a target — the system prompt itself asks for a concise answer. Defaults to `1000`; scales up automatically when `EXPLAIN_ERRORS_LANGUAGE` is set (see below), unless you set this explicitly, which always overrides the scaling. |
 | `OPENAI_TIMEOUT` | No | Request timeout in seconds for the OpenAI client. Defaults to `10`. |
 | `OPENAI_MAX_TRACEBACK_CHARS` | No | Traceback is trimmed to its last N characters before being sent. Defaults to `3000`. |
 | `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` | No | When `True` (the default), the middleware prints the explanation to stdout and returns `None`, so exception handling continues normally and Django renders its standard debug page. Set to `False` to instead return a JSON 500 response, which ends exception handling early (see Compatibility above). |
@@ -207,7 +209,7 @@ By default, explanations are written in English. Set `EXPLAIN_ERRORS_LANGUAGE` t
 read them in another language instead:
 
 ```python
-EXPLAIN_ERRORS_LANGUAGE = "Spanish"
+EXPLAIN_ERRORS_LANGUAGE = "Spanish"  # or the code form, "es"
 ```
 
 This is independent of Django's own `LANGUAGE_CODE`, which controls the language your
