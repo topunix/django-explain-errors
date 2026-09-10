@@ -144,18 +144,24 @@ Sequencing below follows from that.
 Fold each into whichever branch already touches the relevant file.
 
 - No CI test matrix. `setup.py` declares `Django>=4.2` and `python_requires>=3.9`, but the
-  classifiers stop at Django 5.1 and the suite is only run against one Python/Django
-  combination. Django 6.1 requires Python 3.12, so the matrix has to model Python and Django
-  together, not either alone, or it will silently skip the combinations that actually matter.
+  suite is only run against one Python/Django combination. Django 6.1 requires Python 3.12,
+  so the matrix has to model Python and Django together, not either alone, or it will
+  silently skip the combinations that actually matter.
+  The per-version `Framework :: Django :: X.Y` classifiers (4.2 through 6.1) were removed for
+  the same reason: none were backed by a suite run. 5.0/5.1/5.2 were never executed, 6.0/6.1
+  weren't installable in the sandbox that added them, and 4.2/6.1 were only touched by the
+  three-integration compatibility checks, not the full suite. `install_requires` already
+  carries the real constraint (`Django>=4.2`), and an unlisted version doesn't block
+  installation, so nothing is lost by leaving them out. Restoring the per-version classifiers
+  is part of building this matrix, not a separate task: add back only the versions the
+  matrix actually runs green.
   Cheap to add, since the suite is fully mocked and has no network dependency.
   Verify: a CI workflow running `tests` against more than one Python/Django combination
   exists under `.github/workflows/` on `main`.
-- The `description` in `setup.py` still says explanations go to OpenAI and are printed to
-  stdout. Neither is accurate: any OpenAI-compatible endpoint works including local models
-  and Claude, preserve mode is now the default, and RAG is not mentioned at all. It is the
-  PyPI summary line, so it is frozen per version and must change in a release commit.
-  Fold into the next version bump.
-  Verify: `description` in `setup.py` mentions provider-agnostic endpoints and the RAG layer.
+- The `description` in `setup.py` and the GitHub repository description are intentionally
+  identical, so they don't drift apart again. Change both together. `setup.py`'s copy is the
+  PyPI summary line, frozen per version, so it can only change in a release commit.
+  Verify: not applicable. This is a standing convention, not a state to check off.
 - Sentry captures a spurious event when the explanation call itself fails (bad key, timeout,
   unreachable endpoint), via its `httpx` integration instrumenting inside the HTTP client,
   even though `explain_errors` catches the exception internally and it never becomes an
