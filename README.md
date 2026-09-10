@@ -39,7 +39,7 @@ Local development only. It requires `DEBUG = True` and is inert otherwise.
 - Redacts secrets, tokens, and emails from tracebacks before sending
 - Rate limits API calls with a configurable sliding window
 - Works with both sync (WSGI) and async (ASGI) views
-- Securely manages the OpenAI API key using environment variables
+- Manages the API key using environment variables
 
 ## Installation
 
@@ -91,7 +91,7 @@ pip install django-explain-errors
 
 2. **Trigger an error in your Django application**:
 
-   The middleware captures the error, sends it to OpenAI for explanation, and prints the explanation to stdout. By default (`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True`), it then lets exception handling continue normally, so Django (or whatever else is watching, such as `runserver_plus` or Sentry — see Compatibility below) renders exactly what it would without this middleware installed. Set `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False` to instead get a JSON `500` response containing the error message and the explanation.
+   The middleware captures the error, sends it to the configured model for explanation, and prints the explanation to stdout. By default (`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True`), it then lets exception handling continue normally, so Django (or whatever else is watching, such as `runserver_plus` or Sentry — see Compatibility below) renders exactly what it would without this middleware installed. Set `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False` to instead get a JSON `500` response containing the error message and the explanation.
 
 ## Async Support
 
@@ -132,7 +132,7 @@ developer is actually investigating.
 
 | Setting / variable | Required | Description |
 | ------------------ | -------- | ----------- |
-| `OPENAI_API_KEY` (env or settings) | Yes, when `DEBUG=True` | API key used to authenticate with OpenAI. Read first from the environment, then from `settings`. |
+| `OPENAI_API_KEY` (env or settings) | Yes, unless `OPENAI_BASE_URL` points at an endpoint that does not authenticate | API key used to authenticate with the configured endpoint. Read first from the environment, then from `settings`. |
 | `DEBUG` | Yes | The middleware is only active when `DEBUG=True`. When `False`, requests pass through untouched. |
 | `OPENAI_MODEL` | No | Model used for explanations. Defaults to `gpt-4o-mini`. |
 | `OPENAI_MAX_TOKENS` | No | Ceiling on tokens generated for the explanation, not a target — the system prompt itself asks for a concise answer. Defaults to `1000`. |
@@ -172,7 +172,7 @@ OPENAI_MODEL = "..."  # see Anthropic's current model list below
 
 `OPENAI_MODEL` is mandatory here: the default (`gpt-4o-mini`) doesn't exist on Anthropic's API
 and will 404. Use one of the model names from
-[Anthropic's model overview](https://docs.anthropic.com/en/docs/about-claude/models/overview);
+[Anthropic's model overview](https://platform.claude.com/docs/en/about-claude/models/overview);
 model names are versioned and retired over time, so check that page rather than relying on a
 name pinned here.
 
