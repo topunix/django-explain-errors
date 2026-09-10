@@ -140,6 +140,11 @@ developer is actually investigating.
 | `OPENAI_MAX_TRACEBACK_CHARS` | No | Traceback is trimmed to its last N characters before being sent. Defaults to `3000`. |
 | `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` | No | When `True` (the default), the middleware prints the explanation to stdout and returns `None`, so exception handling continues normally and Django renders its standard debug page. Set to `False` to instead return a JSON 500 response, which ends exception handling early (see Compatibility above). |
 | `OPENAI_BASE_URL` (env or settings) | No | Base URL for any OpenAI-compatible API (for example Ollama at `http://localhost:11434/v1`). When set, a missing API key is replaced with a placeholder since local servers do not require one. |
+| `EXPLAIN_ERRORS_MAX_CALLS` | No | Together with `EXPLAIN_ERRORS_WINDOW_SECONDS`, caps API spend to at most this many explanations within a rolling window; once the cap is hit, further errors in that window are not sent for explanation until an earlier call ages out. Defaults to `5`. |
+| `EXPLAIN_ERRORS_WINDOW_SECONDS` | No | Length in seconds of the rolling window `EXPLAIN_ERRORS_MAX_CALLS` is measured against. Defaults to `60` (with the defaults, at most 5 explanations per 60-second window). |
+| `EXPLAIN_ERRORS_REDACT_PATTERNS` | No | Extra regex pattern strings (each passed to `re.compile`) applied to the traceback, appended after the built-in secret/token/email patterns. An invalid pattern is skipped with a warning rather than raising. Defaults to `[]`. |
+| `EXPLAIN_ERRORS_REDACT_DISABLE_DEFAULTS` | No | When `True`, skips the built-in secret/token/email redaction patterns entirely and redacts only what `EXPLAIN_ERRORS_REDACT_PATTERNS` specifies. Turning this on removes the default protection against leaking secrets and PII in tracebacks. Defaults to `False`. |
+| `EXPLAIN_ERRORS_REDACT_REPLACEMENT` | No | Replacement string substituted for anything matched by the redaction patterns. Defaults to `"[REDACTED]"`. |
 
 ## Using local models (Ollama)
 
