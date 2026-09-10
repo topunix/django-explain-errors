@@ -186,11 +186,6 @@ Fold each into whichever branch already touches the relevant file.
   into an opaque 401. Either restrict the placeholder to loopback and private-network hosts,
   or catch the 401 and raise a message naming `OPENAI_API_KEY`. Folds into whichever branch
   next touches `client.py`.
-- The README Configuration table omits `EXPLAIN_ERRORS_MAX_CALLS`,
-  `EXPLAIN_ERRORS_WINDOW_SECONDS`, and the `EXPLAIN_ERRORS_REDACT_*` settings entirely.
-  Missing coverage, not a wrong default. Fold into the next README touch.
-  Verify: `EXPLAIN_ERRORS_MAX_CALLS`, `EXPLAIN_ERRORS_WINDOW_SECONDS`, and the
-  `EXPLAIN_ERRORS_REDACT_*` settings all appear in the README's Configuration table on `main`.
 - `docs/hardening-design.md.` has a trailing dot in the filename.
   Verify: no file with a trailing dot exists under `docs/` on `main`.
 - `docs/design.md` does not exist on `main`. It was written in a prior session and never
