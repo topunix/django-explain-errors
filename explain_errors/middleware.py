@@ -25,6 +25,30 @@ SYSTEM_PROMPT = (
     "why, and how to fix it. Be concrete and skip preamble."
 )
 
+# Appended to SYSTEM_PROMPT only when EXPLAIN_ERRORS_LANGUAGE is set, so the
+# default (unset) prompt stays byte-identical to what ships today.
+LANGUAGE_CLAUSE_TEMPLATE = (
+    " Answer in {language}. Keep exception type names, Django and Python "
+    "identifiers, attribute names, settings names, code, file paths, and "
+    "tracebacks in English."
+)
+
+# Some languages tokenize far worse than English for equivalent content, so
+# the fixed EXPLANATION_WORD_BUDGET can consume proportionally more of
+# DEFAULT_MAX_TOKENS. The ceiling is billed on tokens generated, not on the
+# cap itself, so unused headroom is free — there is no reason to ration it
+# per language, and a per-language table would silently truncate every
+# language it didn't anticipate. Apply the worst-case multiplier from the
+# languages estimated (see the report in docs/tasks/explain-errors-language.md)
+# to any configured language, known or not.
+LANGUAGE_MAX_TOKENS_MULTIPLIER = 3.0
+
+
+def _default_max_tokens_for_language(language):
+    if not language:
+        return DEFAULT_MAX_TOKENS
+    return int(DEFAULT_MAX_TOKENS * LANGUAGE_MAX_TOKENS_MULTIPLIER)
+
 
 class ExplainErrorsMiddleware:
     """
@@ -49,7 +73,21 @@ class ExplainErrorsMiddleware:
 
             # Configurable via settings, with sensible defaults.
             self.model = getattr(settings, "OPENAI_MODEL", "gpt-4o-mini")
-            self.max_tokens = getattr(settings, "OPENAI_MAX_TOKENS", DEFAULT_MAX_TOKENS)
+            self.language = getattr(settings, "EXPLAIN_ERRORS_LANGUAGE", None)
+
+            configured_max_tokens = getattr(settings, "OPENAI_MAX_TOKENS", None)
+            if configured_max_tokens is not None:
+                self.max_tokens = configured_max_tokens
+            else:
+                self.max_tokens = _default_max_tokens_for_language(self.language)
+
+            if self.language:
+                self.system_prompt = SYSTEM_PROMPT + LANGUAGE_CLAUSE_TEMPLATE.format(
+                    language=self.language
+                )
+            else:
+                self.system_prompt = SYSTEM_PROMPT
+
             timeout = getattr(settings, "OPENAI_TIMEOUT", 10)
 
             self.openai_client = get_openai_client(timeout=timeout)
@@ -128,7 +166,7 @@ class ExplainErrorsMiddleware:
                 response = self.openai_client.chat.completions.create(
                     model=self.model,
                     messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
+                        {"role": "system", "content": self.system_prompt},
                         {"role": "user", "content": prompt},
                     ],
                     max_tokens=self.max_tokens,

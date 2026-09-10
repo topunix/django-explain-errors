@@ -145,6 +145,7 @@ developer is actually investigating.
 | `EXPLAIN_ERRORS_REDACT_PATTERNS` | No | Extra regex pattern strings (each passed to `re.compile`) applied to the traceback, appended after the built-in secret/token/email patterns. An invalid pattern is skipped with a warning rather than raising. Defaults to `[]`. |
 | `EXPLAIN_ERRORS_REDACT_DISABLE_DEFAULTS` | No | When `True`, skips the built-in secret/token/email redaction patterns entirely and redacts only what `EXPLAIN_ERRORS_REDACT_PATTERNS` specifies. Turning this on removes the default protection against leaking secrets and PII in tracebacks. Defaults to `False`. |
 | `EXPLAIN_ERRORS_REDACT_REPLACEMENT` | No | Replacement string substituted for anything matched by the redaction patterns. Defaults to `"[REDACTED]"`. |
+| `EXPLAIN_ERRORS_LANGUAGE` | No | Language the explanation prose is written in, as a plain name or code (for example `"Spanish"` or `"es"`). Defaults to `None`, meaning English. Exception names, identifiers, code, file paths, and tracebacks always stay in English regardless of this setting. |
 
 ## Using local models (Ollama)
 
@@ -199,6 +200,37 @@ entirely. Against a real remote endpoint such as Anthropic's, that placeholder i
 and rejected, so a missing `OPENAI_API_KEY` shows up as an opaque `401 Unauthorized` rather
 than a clear configuration error. If you see a 401 with `OPENAI_BASE_URL` pointed at a remote
 provider, check that `OPENAI_API_KEY` — not a provider-specific variable — is actually set.
+
+## Explanation language
+
+By default, explanations are written in English. Set `EXPLAIN_ERRORS_LANGUAGE` to
+read them in another language instead:
+
+```python
+EXPLAIN_ERRORS_LANGUAGE = "Spanish"
+```
+
+This is independent of Django's own `LANGUAGE_CODE`, which controls the language your
+site serves to its users, not the language you read explanations in. Regardless of
+`EXPLAIN_ERRORS_LANGUAGE`, exception type names, Django and Python identifiers, code,
+file paths, and tracebacks are always kept in English, so they stay greppable and
+matchable against documentation and search results. Only the explanatory prose is
+translated.
+
+**Known limitation:** small local models behind `OPENAI_BASE_URL` (see "Using local
+models" above) tend to degrade sharply outside English. Output quality with
+`EXPLAIN_ERRORS_LANGUAGE` set does not transfer uniformly across providers — it is
+generally solid against OpenAI and Anthropic's APIs, but a small local model that
+writes fluent English explanations may produce broken or mixed-language output once
+asked to switch languages.
+
+When a language is configured, the token ceiling (`OPENAI_MAX_TOKENS`) is scaled up
+automatically so explanations in languages that tokenize less efficiently than English
+aren't cut off mid-sentence. This scaling is deliberately generous — billing follows
+tokens actually generated, so unused headroom costs nothing — rather than precise: the
+underlying tokens-per-word figures are estimates, not direct measurements, and the
+default model (`gpt-4o-mini`) uses the `o200k_base` tokenizer, which handles non-Latin
+scripts considerably better than the `cl100k_base`-era ratios these estimates lean on.
 
 ## Codebase-aware explanations (RAG)
 
