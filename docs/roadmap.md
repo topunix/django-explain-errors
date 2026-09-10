@@ -186,6 +186,12 @@ Fold each into whichever branch already touches the relevant file.
   into an opaque 401. Either restrict the placeholder to loopback and private-network hosts,
   or catch the 401 and raise a message naming `OPENAI_API_KEY`. Folds into whichever branch
   next touches `client.py`.
+- `_compiled_patterns()` in `explain_errors/sanitize.py` reports an invalid
+  `EXPLAIN_ERRORS_REDACT_PATTERNS` entry with a bare `print`, not the `explain_errors`
+  logger. Inconsistent with the truncation warning in `middleware.py` and invisible to
+  anyone configuring logging. One-line fix, folds into whichever branch next touches
+  `sanitize.py`.
+  Verify: `sanitize.py` uses `logging` rather than `print` for the invalid-pattern case.
 - `docs/hardening-design.md.` has a trailing dot in the filename.
   Verify: no file with a trailing dot exists under `docs/` on `main`.
 - `docs/design.md` does not exist on `main`. It was written in a prior session and never
