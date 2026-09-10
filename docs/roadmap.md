@@ -25,24 +25,7 @@ Sequencing below follows from that.
 
 ## Sequenced queue
 
-1. **explain-errors-language**: adds `EXPLAIN_ERRORS_LANGUAGE`, default `None` meaning
-   English. One prompt clause, not `gettext`. Django's i18n machinery is for a fixed string
-   set; generated output is unbounded, so translation catalogs are the wrong tool.
-   Prompt must instruct the model to keep exception names, Django and Python identifiers,
-   and code in English so they stay greppable.
-   Do **not** inherit from `LANGUAGE_CODE`: that is the site's audience language, not the
-   maintainer's, and the two diverge routinely.
-   The word budget needs per-language scaling, since Japanese, Korean, Arabic, Hindi, and
-   Thai tokenize far worse than English. That is a different constant per language, not
-   runtime expansion. The generous ceiling from preserve-mode-default already absorbs most
-   of the variance, so this is a refinement rather than a second defect fix.
-   No dependencies, and it does not need the eval harness, since it is a delivery change
-   rather than a claim about output quality.
-   Known limitation to document: small local models behind `OPENAI_BASE_URL` degrade sharply
-   outside English, so quality does not transfer uniformly across the provider matrix.
-   Verify: `EXPLAIN_ERRORS_LANGUAGE` appears in `explain_errors/middleware.py` on `main`.
-
-2. **Eval harness**: fixture set of real tracebacks plus a scored RAG-on vs RAG-off
+1. **Eval harness**: fixture set of real tracebacks plus a scored RAG-on vs RAG-off
    comparison. Currently there is no regression guard on explanation quality, only on
    plumbing. Load-bearing for django-docs-links, explanation-levels, and debug page
    injection, not just RAG.
@@ -53,7 +36,7 @@ Sequencing below follows from that.
    Rejected shape: a harness that only checks the API returned something.
    Verify: an `evals/` or `tests/evals/` directory exists on `main`.
 
-3. **django-docs-links**: cross-reference explanations to official Django documentation.
+2. **django-docs-links**: cross-reference explanations to official Django documentation.
    Ship the cheap version first: a static map of exception type plus context to a docs
    anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
    generated prose is not, which matters most for the learning audience and shrinks the
@@ -62,12 +45,12 @@ Sequencing below follows from that.
    - Django docs license terms for redistributing a derived map or index.
    - Version pinning. URLs carry a version segment, and serving 5.2 links to a user on 4.2
      is worse than no link.
-   - Translated docs coverage, if explain-errors-language has shipped.
+   - Translated docs coverage, now that `EXPLAIN_ERRORS_LANGUAGE` has shipped.
      `docs.djangoproject.com` has translations with uneven coverage, so a localized link may
      404 or silently fall back.
    Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
 
-4. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
+3. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
    backed by shipped behavior. Not before. The README documents shipped behavior; anything
    earlier is a promise that has to be kept.
    Verify: the README lead paragraph describes a grounded Django learning aid rather than an
