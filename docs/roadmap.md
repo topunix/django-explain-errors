@@ -150,12 +150,10 @@ Fold each into whichever branch already touches the relevant file.
   Cheap to add, since the suite is fully mocked and has no network dependency.
   Verify: a CI workflow running `tests` against more than one Python/Django combination
   exists under `.github/workflows/` on `main`.
-- The `description` in `setup.py` still says explanations go to OpenAI and are printed to
-  stdout. Neither is accurate: any OpenAI-compatible endpoint works including local models
-  and Claude, preserve mode is now the default, and RAG is not mentioned at all. It is the
-  PyPI summary line, so it is frozen per version and must change in a release commit.
-  Fold into the next version bump.
-  Verify: `description` in `setup.py` mentions provider-agnostic endpoints and the RAG layer.
+- The `description` in `setup.py` and the GitHub repository description are intentionally
+  identical, so they don't drift apart again. Change both together. `setup.py`'s copy is the
+  PyPI summary line, frozen per version, so it can only change in a release commit.
+  Verify: not applicable. This is a standing convention, not a state to check off.
 - Sentry captures a spurious event when the explanation call itself fails (bad key, timeout,
   unreachable endpoint), via its `httpx` integration instrumenting inside the HTTP client,
   even though `explain_errors` catches the exception internally and it never becomes an
