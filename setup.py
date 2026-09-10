@@ -10,7 +10,7 @@ with open('README.md', encoding='utf-8') as f:
 
 setup(
     name='django-explain-errors',
-    version='0.4.0',
+    version='0.5.0',
     packages=find_packages(exclude=['tests', 'tests.*']),
     description='Django middleware that captures errors and exceptions, sends them to OpenAI for a detailed explanation, and prints the explanation to stdout when debug mode is enabled. Supports both sync and async views.',
     long_description_content_type='text/markdown',
@@ -38,6 +38,9 @@ setup(
         'Framework :: Django :: 4.2',
         'Framework :: Django :: 5.0',
         'Framework :: Django :: 5.1',
+        'Framework :: Django :: 5.2',
+        'Framework :: Django :: 6.0',
+        'Framework :: Django :: 6.1',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: MIT License',
         'Operating System :: OS Independent',
