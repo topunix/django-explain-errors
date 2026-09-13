@@ -75,3 +75,9 @@ cython_debug/
 .vscode/
 .claude/
 .explain_errors_index.db
+
+# Eval harness (docs/tasks/eval-harness.md): real API output, regenerate
+# by running evals/run.py. Never expected to be reproducible or diffable.
+evals/results/
+evals/fixture_app/*.sqlite3
+evals/fixture_app/.eval_rag_index.db*

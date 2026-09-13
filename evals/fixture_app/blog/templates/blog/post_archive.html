@@ -1,0 +1,12 @@
+<h1>All posts</h1>
+<ul>
+{% for post in posts %}
+  <li>
+    {{ post.title }}
+    {% if post.published_at %}
+      (published)
+    {% else %}
+      (draft)
+  </li>
+{% endfor %}
+</ul>

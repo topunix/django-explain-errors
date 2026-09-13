@@ -11,7 +11,7 @@ with open('README.md', encoding='utf-8') as f:
 setup(
     name='django-explain-errors',
     version='0.6.0',
-    packages=find_packages(exclude=['tests', 'tests.*']),
+    packages=find_packages(exclude=['tests', 'tests.*', 'evals', 'evals.*']),
     description='Django middleware that explains unhandled exceptions in DEBUG using an LLM, optionally grounded in your own project source via a local vector index. Works with OpenAI, Claude, or any OpenAI-compatible endpoint including local models.',
     long_description_content_type='text/markdown',
     long_description=long_description,

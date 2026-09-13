@@ -199,6 +199,16 @@ Fold each into whichever branch already touches the relevant file.
   cleanup is ever scripted.
   Verify: not applicable. Closes only if release automation or scripted branch cleanup is
   ever built.
+- `evals/run.py` learns each fixture's exception type by monkeypatching
+  `explain_errors.middleware.sanitize_traceback`, the one call inside `process_exception`
+  where `sys.exc_info()` is still live once `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False` has
+  short-circuited `got_request_exception` (that signal only fires when the exception is left
+  to propagate). This couples the harness to an internal function's name rather than a public
+  seam. Renaming or removing `sanitize_traceback` breaks the harness loudly, with
+  `patch.object` raising `AttributeError` at run time, not silently -- but worth knowing
+  before any refactor of `middleware.py` touches that name.
+  Verify: not applicable. Closes only if `evals/run.py`'s exception-capture mechanism changes
+  to something other than patching `sanitize_traceback`.
 
 ## Open strategic questions
 - Provider abstraction beyond OpenAI-compatible endpoints. The Anthropic compatibility layer

@@ -310,3 +310,25 @@ class OpenAICallConfigTest(SimpleTestCase):
             with patch("openai.OpenAI") as mock_cls:
                 ExplainErrorsMiddleware(lambda r: None)
                 self.assertEqual(mock_cls.call_args.kwargs["timeout"], 7)
+
+    def test_token_usage_logged_at_debug_level(self):
+        self.client.chat.completions.create.return_value = MagicMock(
+            choices=[
+                MagicMock(
+                    message=MagicMock(content="Mocked explanation."),
+                    finish_reason="stop",
+                )
+            ],
+            usage=MagicMock(prompt_tokens=123, completion_tokens=45),
+        )
+        mw = ExplainErrorsMiddleware(lambda r: None)
+
+        with self.assertLogs("explain_errors", level="DEBUG") as cm:
+            mw.process_exception(self.factory.get("/"), Exception("x"))
+
+        self.assertTrue(
+            any(
+                "prompt_tokens=123" in message and "completion_tokens=45" in message
+                for message in cm.output
+            )
+        )

@@ -172,6 +172,12 @@ class ExplainErrorsMiddleware:
                     max_tokens=self.max_tokens,
                 )
                 explanation = response.choices[0].message.content
+                usage = getattr(response, "usage", None)
+                logger.debug(
+                    "explain_errors: token usage prompt_tokens=%s completion_tokens=%s",
+                    getattr(usage, "prompt_tokens", None),
+                    getattr(usage, "completion_tokens", None),
+                )
                 if response.choices[0].finish_reason == "length":
                     logger.warning(
                         "explain_errors: explanation truncated by OPENAI_MAX_TOKENS=%s",
