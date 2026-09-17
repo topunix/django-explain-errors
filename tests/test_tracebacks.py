@@ -89,12 +89,17 @@ class FormatTracebackTest(SimpleTestCase):
         exc = ValueError("standalone, never raised")
         self.assertIsNone(exc.__traceback__)
 
+        # An unrelated exception is active here on purpose: the fallback
+        # must be built from `exc` itself, not from ambient sys.exc_info()
+        # (which is what makes it safe to call from a sync_to_async worker
+        # thread, where sys.exc_info() is empty regardless).
         try:
-            raise RuntimeError("ambient exception for format_exc()")
+            raise RuntimeError("unrelated ambient exception")
         except RuntimeError:
-            result = format_traceback(exc, max_chars=50)
+            result = format_traceback(exc, max_chars=200)
 
-        self.assertIn("ambient exception for format_exc()", result)
+        self.assertIn("ValueError: standalone, never raised", result)
+        self.assertNotIn("RuntimeError", result)
 
     def test_header_line_present_on_every_path(self):
         # Over-budget fallback path: max_chars is too small even for the
@@ -107,12 +112,14 @@ class FormatTracebackTest(SimpleTestCase):
         self.assertTrue(fallback_result.startswith("...(truncated)...\n"))
         self.assertIn("ValueError: boom", fallback_result)
 
-        # None-traceback fallback path.
+        # None-traceback fallback path: built from the exception object, not
+        # ambient sys.exc_info() (see _tail_slice_fallback).
         try:
             raise RuntimeError("ambient")
         except RuntimeError:
             none_tb_result = format_traceback(ValueError("detached"), max_chars=50)
-        self.assertIn("RuntimeError", none_tb_result)
+        self.assertIn("ValueError", none_tb_result)
+        self.assertNotIn("RuntimeError", none_tb_result)
 
         # Normal path, budget large enough for everything.
         try:

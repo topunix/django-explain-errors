@@ -37,8 +37,13 @@ def _is_library_frame(filename):
     return False
 
 
-def _tail_slice_fallback(max_chars):
-    tb = traceback.format_exc()
+def _tail_slice_fallback(exc, max_chars):
+    # Built from the exception object, not traceback.format_exc(): the async
+    # path runs process_exception in a sync_to_async worker thread, where
+    # sys.exc_info() (which format_exc() reads) is empty, and format_exc()
+    # would silently produce "NoneType: None". format_exception() takes the
+    # exception explicitly and also handles exc.__traceback__ being None.
+    tb = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
     if len(tb) > max_chars:
         tb = "...(truncated)...\n" + tb[-max_chars:]
     return tb
@@ -51,7 +56,7 @@ def format_traceback(exc: BaseException, max_chars: int) -> str:
     """
     tb = exc.__traceback__
     if tb is None:
-        return _tail_slice_fallback(max_chars)
+        return _tail_slice_fallback(exc, max_chars)
 
     frame_summaries = traceback.extract_tb(tb)
     header_text = "".join(traceback.format_exception_only(type(exc), exc))
@@ -80,7 +85,7 @@ def format_traceback(exc: BaseException, max_chars: int) -> str:
     if len(baseline) > max_chars:
         # Application frames alone blow the budget; the tail-slice fallback
         # at least guarantees the result stays under max_chars.
-        return _tail_slice_fallback(max_chars)
+        return _tail_slice_fallback(exc, max_chars)
 
     kept = set(app_indices)
     best = baseline
