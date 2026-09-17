@@ -402,14 +402,19 @@ names the right file and function. Without source access, `gpt-4o-mini`
 tends to invent a plausible-sounding function name or parameter rather than
 say it doesn't know; given the actual code via RAG, it mostly does not.
 
-Two limitations are worth knowing before trusting this uncritically: RAG
+Three limitations are worth knowing before trusting this uncritically: RAG
 can anchor on the wrong retrieved chunk, as it did in one fixture
 (`missing_post_key`) where the fix got redirected to a retrieved template
-instead of the view; and the judge itself sees only the traceback and the
+instead of the view; the judge itself sees only the traceback and the
 known facts, not the retrieved source, so a detail RAG-on read correctly
-from code can look just as unverified to the judge as one it invented. Full
-per-fixture results, the judge prompt, and how to reproduce this (about two
-cents a pass) are in [`evals/README.md`](evals/README.md).
+from code can look just as unverified to the judge as one it invented; and
+the traceback is trimmed to its last `OPENAI_MAX_TRACEBACK_CHARS`, which
+for a deep ORM stack can drop the application frames entirely, as the
+`missing_fk` example above shows -- part of RAG-off's disadvantage there
+may be that it never saw the frame naming the function, not only that it
+lacked the source. Untested. Full per-fixture results, the judge prompt,
+and how to reproduce this (about two cents a pass) are in
+[`evals/README.md`](evals/README.md).
 
 ## Example
 
