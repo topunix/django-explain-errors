@@ -8,6 +8,7 @@ a change might affect explanation quality. `tests/test_eval_*.py` cover the
 plumbing here with everything mocked; they do not run this script for real.
 """
 import argparse
+import ast
 import datetime
 import json
 import logging
@@ -19,6 +20,7 @@ import sys
 import time
 from pathlib import Path
 from unittest.mock import patch
+from urllib.parse import urlsplit
 
 EVALS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EVALS_DIR.parent
@@ -28,28 +30,93 @@ RESULTS_DIR = EVALS_DIR / "results"
 DB_PATH = FIXTURE_APP_DIR / "eval_fixture_app.sqlite3"
 INDEX_PATH = FIXTURE_APP_DIR / ".eval_rag_index.db"
 
-# Included in the judge's source section for every fixture (see
-# _build_judge_source), so the judge can check a claimed function name,
-# parameter, or file against the real thing instead of treating anything
-# outside the traceback and known facts as unverifiable.
-JUDGE_SOURCE_MODULES = (
-    ("blog/views.py", BLOG_DIR / "views.py"),
-    ("blog/models.py", BLOG_DIR / "models.py"),
-    ("blog/urls.py", BLOG_DIR / "urls.py"),
-)
 
-
-def _build_judge_source(fixture):
-    """(label, content) pairs for evals.judge.format_source_section: the
-    three modules above, present for every fixture, plus any templates this
-    fixture names via its `templates` field. Sending the same fixed modules
-    regardless of fixture or RAG side means their presence can't tip the
-    judge off to which explanation had RAG.
+def _extract_function_source(file_text, function_name):
+    """Return the exact source text of the first function or method named
+    `function_name` in `file_text`, or None if it isn't there.
     """
-    sources = [(label, path.read_text()) for label, path in JUDGE_SOURCE_MODULES]
+    tree = ast.parse(file_text)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:
+            return ast.get_source_segment(file_text, node)
+    return None
+
+
+def _extract_url_pattern(urls_text, view_name):
+    """Return the exact source text of the path()/re_path() call in
+    `urls_text` that routes to `view_name` (matched as `views.view_name`,
+    however the view module was imported), or None if it isn't there.
+    """
+    tree = ast.parse(urls_text)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            for arg in node.args:
+                if isinstance(arg, ast.Attribute) and arg.attr == view_name:
+                    return ast.get_source_segment(urls_text, node)
+    return None
+
+
+def _build_judge_source(fixture, exception):
+    """(label, content) pairs for evals.judge.format_source_section: the
+    failing function's own source, the urls.py pattern that routes to this
+    fixture's view, and any templates the fixture names via its `templates`
+    field. Deliberately not whole modules -- 300 lines of unrelated views is
+    exactly the kind of noise that makes the judge assume "unverified"
+    rather than check.
+
+    `exception` is the real exception instance the fixture raised (with its
+    original __traceback__), or None if it wasn't captured. Its innermost
+    *project* frame (via explain_errors.rag.retriever.extract_project_frames,
+    reused rather than re-implemented here) names the failing function most
+    of the time. It can be empty, though: a call with a bad keyword argument
+    raises TypeError attributed to the caller's frame before the callee's own
+    frame exists at all, so a project frame is never created for it
+    (unexpected_kwarg is exactly this case). When that happens, fall back to
+    the view this fixture's URL routes to -- the same function the traceback
+    and known facts are about either way.
+    """
+    from django.urls import resolve
+
+    from explain_errors.rag.retriever import extract_project_frames
+
+    match = resolve(urlsplit(fixture.url).path)
+    view_name = match.func.__name__
+
+    frame = None
+    if exception is not None:
+        project_frames = extract_project_frames(exception)
+        if project_frames:
+            frame = project_frames[-1]
+
+    if frame is not None:
+        function_file = Path(frame.filename)
+        function_name = frame.name
+    else:
+        function_file = Path(match.func.__code__.co_filename)
+        function_name = view_name
+
+    function_source = _extract_function_source(function_file.read_text(), function_name)
+    if function_source is None:
+        raise RuntimeError(
+            f"fixture {fixture.name!r}: could not find function {function_name!r} "
+            f"in {function_file} -- the judge source extractor is out of sync "
+            "with the fixture app"
+        )
+    sources = [(f"blog/{function_file.name} ({function_name})", function_source)]
+
+    urls_text = (BLOG_DIR / "urls.py").read_text()
+    url_pattern = _extract_url_pattern(urls_text, view_name)
+    if url_pattern is None:
+        raise RuntimeError(
+            f"fixture {fixture.name!r}: could not find a urls.py pattern "
+            f"routing to {view_name!r}"
+        )
+    sources.append((f"blog/urls.py ({view_name} route)", url_pattern))
+
     for template_name in fixture.templates:
         template_path = BLOG_DIR / "templates" / template_name
         sources.append((template_name, template_path.read_text()))
+
     return sources
 
 
@@ -144,9 +211,9 @@ class _UsageCaptureHandler(logging.Handler):
 
 def _capture_call(fn):
     """Run fn() (a single request through the fixture app), returning
-    (result, captured) where captured holds the exception type the
-    middleware actually handled, the sanitized traceback text sent to the
-    generator, and token usage if the generator reported any.
+    (result, captured) where captured holds the exception type and instance
+    the middleware actually handled, the sanitized traceback text sent to
+    the generator, and token usage if the generator reported any.
 
     Exception type can't be read off got_request_exception: that signal
     only fires when the exception is left to propagate (preserve mode), and
@@ -155,20 +222,26 @@ def _capture_call(fn):
     Instead this spies on sanitize_traceback, which middleware.py always
     calls, synchronously, from inside the `except Exception:` block in
     process_exception -- so sys.exc_info() is still live when it runs.
+
+    The captured exception instance (with its original __traceback__) is
+    kept only in memory, for _build_judge_source -- it never goes into the
+    JSON results file; "traceback" (the sanitized text) does.
     """
     import explain_errors.middleware as mw_mod
     from explain_errors.sanitize import sanitize_traceback as real_sanitize_traceback
 
     captured = {
         "exc_type": None,
+        "exception": None,
         "traceback": None,
         "prompt_tokens": None,
         "completion_tokens": None,
     }
 
     def _spy(tb_text):
-        exc_type, _exc_value, _tb = sys.exc_info()
+        exc_type, exc_value, _tb = sys.exc_info()
         captured["exc_type"] = exc_type
+        captured["exception"] = exc_value
         sanitized = real_sanitize_traceback(tb_text)
         captured["traceback"] = sanitized
         return sanitized
@@ -199,9 +272,13 @@ def _hit_fixture(client, fixture):
 
 
 def run_fixture(client, fixture, rag_enabled, run_index):
-    """Run one fixture once and return its call record. Raises
+    """Run one fixture once and return (call_record, exception). Raises
     AssertionError if the fixture didn't raise what it's supposed to --
     that means the fixture is broken, not that the middleware misbehaved.
+
+    `exception` is the real exception instance captured for this call (see
+    _capture_call) -- kept separate from call_record because it isn't JSON
+    serializable and never goes into the results file.
     """
     start = time.perf_counter()
     response, captured = _capture_call(lambda: _hit_fixture(client, fixture))
@@ -225,7 +302,7 @@ def run_fixture(client, fixture, rag_enabled, run_index):
         except ValueError:
             explanation = None
 
-    return {
+    call_record = {
         "fixture": fixture.name,
         "group": fixture.group,
         "rag_enabled": rag_enabled,
@@ -237,15 +314,20 @@ def run_fixture(client, fixture, rag_enabled, run_index):
         "completion_tokens": captured["completion_tokens"],
         "status_code": response.status_code,
     }
+    return call_record, captured["exception"]
 
 
 def run_all(fixtures, runs):
     """Two passes (RAG off, then RAG on) over every fixture, `runs` times
-    each. Returns the flat list of call records.
+    each. Returns (calls, exceptions_by_fixture): the flat list of call
+    records, and one representative captured exception per fixture name
+    (for _build_judge_source -- any call's exception will do, since the
+    fixture app is deterministic).
     """
     from django.test import Client, override_settings
 
     calls = []
+    exceptions_by_fixture = {}
     for rag_enabled in (False, True):
         with override_settings(
             EXPLAIN_ERRORS_RAG_ENABLED=rag_enabled,
@@ -254,11 +336,14 @@ def run_all(fixtures, runs):
             client = Client(raise_request_exception=False)
             for fixture in fixtures:
                 for run_index in range(runs):
-                    calls.append(run_fixture(client, fixture, rag_enabled, run_index))
-    return calls
+                    call_record, exception = run_fixture(client, fixture, rag_enabled, run_index)
+                    calls.append(call_record)
+                    if exception is not None:
+                        exceptions_by_fixture.setdefault(fixture.name, exception)
+    return calls, exceptions_by_fixture
 
 
-def judge_all(fixtures, calls):
+def judge_all(fixtures, calls, exceptions_by_fixture):
     """Pair up each fixture+run's RAG-off and RAG-on calls and judge them.
     Returns the list of judgment records.
     """
@@ -272,7 +357,9 @@ def judge_all(fixtures, calls):
 
     judgments = []
     for fixture in fixtures:
-        source_text = format_source_section(_build_judge_source(fixture))
+        source_text = format_source_section(
+            _build_judge_source(fixture, exceptions_by_fixture.get(fixture.name))
+        )
         run_indices = sorted(
             {c["run_index"] for c in calls if c["fixture"] == fixture.name}
         )
@@ -473,10 +560,10 @@ def main(argv=None):
     )
 
     print(f"Running {len(fixtures)} fixture(s) x {args.runs} run(s) x 2 (RAG off/on)...")
-    calls = run_all(fixtures, args.runs)
+    calls, exceptions_by_fixture = run_all(fixtures, args.runs)
 
     print("Judging...")
-    judgments = judge_all(fixtures, calls)
+    judgments = judge_all(fixtures, calls, exceptions_by_fixture)
 
     from evals.judge import get_judge_model
 

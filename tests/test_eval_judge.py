@@ -33,18 +33,18 @@ def _make_fixture(**overrides):
 VALID_RESPONSE = json.dumps(
     {
         "a": {
+            "claims": [{"claim": "the fix is in sample()", "status": "verified"}],
             "identifies_cause": True,
             "points_to_fix_location": True,
             "fix_would_work": True,
             "written_for_learner": True,
-            "no_fabrication": True,
         },
         "b": {
+            "claims": [{"claim": "the fix is in some_other_func()", "status": "contradicted"}],
             "identifies_cause": False,
             "points_to_fix_location": False,
             "fix_would_work": False,
             "written_for_learner": False,
-            "no_fabrication": False,
         },
         "winner": "A",
         "reasoning": "A is better.",
@@ -100,11 +100,57 @@ class ParseJudgeResponseTest(unittest.TestCase):
         with self.assertRaises(JudgeParseError):
             parse_judge_response(json.dumps(payload))
 
-    def test_missing_no_fabrication_key_raises(self):
+    def test_missing_claims_key_is_a_judge_failure(self):
         payload = json.loads(VALID_RESPONSE)
-        del payload["b"]["no_fabrication"]
+        del payload["b"]["claims"]
         with self.assertRaises(JudgeParseError):
             parse_judge_response(json.dumps(payload))
+
+    def test_claims_not_a_list_raises(self):
+        payload = json.loads(VALID_RESPONSE)
+        payload["a"]["claims"] = "none"
+        with self.assertRaises(JudgeParseError):
+            parse_judge_response(json.dumps(payload))
+
+    def test_claim_missing_claim_text_raises(self):
+        payload = json.loads(VALID_RESPONSE)
+        payload["a"]["claims"] = [{"status": "verified"}]
+        with self.assertRaises(JudgeParseError):
+            parse_judge_response(json.dumps(payload))
+
+    def test_claim_with_invalid_status_raises(self):
+        payload = json.loads(VALID_RESPONSE)
+        payload["a"]["claims"] = [{"claim": "x", "status": "unverified"}]
+        with self.assertRaises(JudgeParseError):
+            parse_judge_response(json.dumps(payload))
+
+    def test_no_fabrication_is_derived_not_read_from_response(self):
+        # A raw no_fabrication key in the response is ignored -- it's always
+        # computed from the claims list.
+        payload = json.loads(VALID_RESPONSE)
+        payload["a"]["no_fabrication"] = False  # contradicts a's all-verified claims
+        parsed = parse_judge_response(json.dumps(payload))
+        self.assertTrue(parsed["a"]["no_fabrication"])
+
+    def test_contradicted_claim_yields_no_fabrication_false(self):
+        parsed = parse_judge_response(VALID_RESPONSE)
+        # b's one claim is "contradicted" in VALID_RESPONSE.
+        self.assertFalse(parsed["b"]["no_fabrication"])
+
+    def test_verified_and_absent_claims_yield_no_fabrication_true(self):
+        payload = json.loads(VALID_RESPONSE)
+        payload["a"]["claims"] = [
+            {"claim": "x", "status": "verified"},
+            {"claim": "y", "status": "absent"},
+        ]
+        parsed = parse_judge_response(json.dumps(payload))
+        self.assertTrue(parsed["a"]["no_fabrication"])
+
+    def test_empty_claims_list_yields_no_fabrication_true(self):
+        payload = json.loads(VALID_RESPONSE)
+        payload["a"]["claims"] = []
+        parsed = parse_judge_response(json.dumps(payload))
+        self.assertTrue(parsed["a"]["no_fabrication"])
 
     def test_invalid_winner_raises(self):
         payload = json.loads(VALID_RESPONSE)
@@ -145,15 +191,14 @@ class BuildJudgePromptTest(unittest.TestCase):
         prompt = build_judge_prompt("tb", fixture, "### blog/views.py\nreal source here", "a", "b")
         self.assertIn("real source here", prompt)
 
-    def test_no_fabrication_question_cites_the_source_section(self):
+    def test_prompt_asks_for_a_claims_list_checked_against_the_source(self):
         fixture = _make_fixture()
         prompt = build_judge_prompt("tb", fixture, "src", "a", "b")
-        self.assertIn(
-            "no_fabrication: Does it avoid stating function names, parameters, "
-            "files, or fix steps that are contradicted by the traceback, the "
-            "known facts, or the source shown above?",
-            prompt,
-        )
+        self.assertIn("first list its specific claims", prompt)
+        self.assertIn('"verified"', prompt)
+        self.assertIn('"contradicted"', prompt)
+        self.assertIn('"absent"', prompt)
+        self.assertNotIn("no_fabrication: Does it avoid", prompt)
 
 
 class CompareRandomizationTest(unittest.TestCase):

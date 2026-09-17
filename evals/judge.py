@@ -25,6 +25,19 @@ QUESTION_KEYS = (
     "no_fabrication",
 )
 
+# Booleans the judge answers directly. no_fabrication is deliberately not
+# here: it's derived from the "claims" list (see parse_judge_response),
+# never asked for as a yes/no, because a direct yes/no question let the
+# judge answer "unverified" without ever checking the source it was given.
+JUDGE_ASKED_KEYS = (
+    "identifies_cause",
+    "points_to_fix_location",
+    "fix_would_work",
+    "written_for_learner",
+)
+
+CLAIM_STATUSES = ("verified", "contradicted", "absent")
+
 # Module-level and easy to edit: the maintainer will iterate on this once
 # real judge output is available. Keep the JSON shape in sync with
 # parse_judge_response below if you change it.
@@ -59,7 +72,19 @@ Where the fix belongs: {expected_fix_location}
 
 ## Your task
 
-For EACH explanation (A and B), answer yes or no to:
+For EACH explanation (A and B), first list its specific claims -- every \
+function name, parameter, file, template, or other code-level detail it \
+states as fact. For each claim, look it up against the traceback, the \
+known facts, and the source above, and mark it:
+- "verified": the traceback, known facts, or source above confirms it.
+- "contradicted": the traceback, known facts, or source above shows it's \
+wrong.
+- "absent": none of them address it either way. The source section is a \
+small excerpt of the project, not the whole thing, so "absent" is not \
+evidence the claim is made up -- only "contradicted" is.
+An explanation with no specific claims gets an empty claims list.
+
+Then, still for EACH explanation, answer yes or no to:
 1. identifies_cause: Does it correctly identify the cause described above?
 2. points_to_fix_location: Does it point the developer to the fix location \
 above, by file and function?
@@ -67,9 +92,6 @@ above, by file and function?
 error?
 4. written_for_learner: Is it written for someone learning Django, rather \
 than assuming they already know the framework?
-5. no_fabrication: Does it avoid stating function names, parameters, \
-files, or fix steps that are contradicted by the traceback, the known \
-facts, or the source shown above?
 
 Then pick an overall winner: "A", "B", or "tie" if they are equally good. \
 Do not favor the longer or more confident-sounding explanation -- favor the \
@@ -78,8 +100,23 @@ one that is more correct and more useful to a learner.
 Respond with ONLY a JSON object, no other text, in exactly this shape:
 
 {{
-  "a": {{"identifies_cause": true, "points_to_fix_location": false, "fix_would_work": true, "written_for_learner": true, "no_fabrication": true}},
-  "b": {{"identifies_cause": true, "points_to_fix_location": true, "fix_would_work": true, "written_for_learner": false, "no_fabrication": false}},
+  "a": {{
+    "claims": [
+      {{"claim": "the fix belongs in post_preview's view function", "status": "verified"}},
+      {{"claim": "revision is an unused parameter", "status": "contradicted"}}
+    ],
+    "identifies_cause": true,
+    "points_to_fix_location": false,
+    "fix_would_work": true,
+    "written_for_learner": true
+  }},
+  "b": {{
+    "claims": [],
+    "identifies_cause": true,
+    "points_to_fix_location": true,
+    "fix_would_work": true,
+    "written_for_learner": false
+  }},
   "winner": "B",
   "reasoning": "One sentence explaining the winner."
 }}
@@ -146,10 +183,39 @@ def build_judge_prompt(traceback_text, fixture, source_text, explanation_a, expl
     )
 
 
+def _parse_claims(side, side_value):
+    """Validate side_value["claims"] and return it unchanged. Strict on
+    purpose: a response missing the claim lists skipped the lookup step
+    entirely, and that's a judge failure, not a silent pass with
+    no_fabrication defaulting to true.
+    """
+    claims = side_value.get("claims")
+    if not isinstance(claims, list):
+        raise JudgeParseError(f"{side}.claims is missing or not a list")
+
+    for i, claim in enumerate(claims):
+        if not isinstance(claim, dict):
+            raise JudgeParseError(f"{side}.claims[{i}] is not an object")
+        if not isinstance(claim.get("claim"), str) or not claim["claim"].strip():
+            raise JudgeParseError(f"{side}.claims[{i}].claim is missing or not a non-empty string")
+        if claim.get("status") not in CLAIM_STATUSES:
+            raise JudgeParseError(
+                f"{side}.claims[{i}].status must be one of {CLAIM_STATUSES}, "
+                f"got {claim.get('status')!r}"
+            )
+
+    return claims
+
+
 def parse_judge_response(raw_text):
     """Strictly parse the judge's raw response text into the expected dict
     shape. Raises JudgeParseError on anything that doesn't match -- a
     malformed response is a judge failure, never silently dropped.
+
+    no_fabrication is not read from the judge's answer -- it's derived here
+    from the per-claim "claims" list: false only if some claim is
+    "contradicted". A claim marked "absent" is not a fabrication, since the
+    source section is a subset of the project, not the whole thing.
     """
     try:
         parsed = json.loads(raw_text)
@@ -163,9 +229,12 @@ def parse_judge_response(raw_text):
         side_value = parsed.get(side)
         if not isinstance(side_value, dict):
             raise JudgeParseError(f"{side!r} section is missing or not an object")
-        for key in QUESTION_KEYS:
+        for key in JUDGE_ASKED_KEYS:
             if not isinstance(side_value.get(key), bool):
                 raise JudgeParseError(f"{side}.{key} is missing or not a boolean")
+
+        claims = _parse_claims(side, side_value)
+        side_value["no_fabrication"] = not any(claim["status"] == "contradicted" for claim in claims)
 
     if parsed.get("winner") not in ("A", "B", "tie"):
         raise JudgeParseError(
