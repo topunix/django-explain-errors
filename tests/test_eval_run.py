@@ -10,8 +10,7 @@ import subprocess
 import sys
 import unittest
 
-from evals.fixtures import FIXTURES_BY_NAME
-from evals.run import _build_judge_source, estimate_cost_usd, tally_judgments, tally_latency, tally_usage
+from evals.run import estimate_cost_usd, tally_judgments, tally_latency, tally_usage
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -147,27 +146,84 @@ class TallyLatencyAndUsageTest(unittest.TestCase):
 
 
 class BuildJudgeSourceTest(unittest.TestCase):
+    """Runs tests/_eval_judge_source_helper.py in a subprocess -- see its
+    docstring for why: _build_judge_source needs django.urls.resolve
+    against the fixture app's own URLconf, and a real captured exception
+    from an actual request, neither of which this suite's process can give
+    it (see test_eval_fixtures.EvalFixtureUrlResolutionTest for the same
+    constraint on a different function).
+    """
 
-    def test_always_includes_views_models_and_urls(self):
-        fixture = FIXTURES_BY_NAME["none_attribute"]
-        sources = _build_judge_source(fixture)
-        labels = [label for label, _content in sources]
-        self.assertEqual(labels, ["blog/views.py", "blog/models.py", "blog/urls.py"])
-        contents = dict(sources)
-        self.assertIn("def latest_post", contents["blog/views.py"])
+    @classmethod
+    def setUpClass(cls):
+        proc = subprocess.run(
+            [sys.executable, "-m", "tests._eval_judge_source_helper"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        assert proc.returncode == 0, proc.stdout + proc.stderr
+        cls.results = json.loads(proc.stdout.strip().splitlines()[-1])
+
+    def _labels(self, fixture_name):
+        return [entry["label"] for entry in self.results[fixture_name]]
+
+    def _contents(self, fixture_name):
+        return {entry["label"]: entry["content"] for entry in self.results[fixture_name]}
+
+    def test_does_not_send_whole_modules(self):
+        # none_attribute's failing function is latest_post; some other
+        # view's body (e.g. prolific_authors, defined nowhere near it)
+        # should not be along for the ride.
+        contents = self._contents("none_attribute")
+        views_content = "\n".join(
+            content for label, content in contents.items() if "views.py" in label
+        )
+        self.assertIn("latest_post", views_content)
+        self.assertNotIn("def prolific_authors", views_content)
+
+    def test_includes_failing_function_and_url_pattern(self):
+        contents = self._contents("none_attribute")
+        labels = self._labels("none_attribute")
+        self.assertTrue(any("views.py" in label for label in labels))
+        self.assertTrue(any("urls.py" in label for label in labels))
+        views_content = next(c for l, c in contents.items() if "views.py" in l)
+        self.assertIn("def latest_post", views_content)
+        urls_content = next(c for l, c in contents.items() if "urls.py" in l)
+        self.assertIn("latest-post", urls_content)
+
+    def test_recursion_fixture_points_at_the_models_method_not_views(self):
+        # str_recursion's exception originates in models.py (Comment.summary),
+        # not in the post_comments view -- the innermost project frame should
+        # win over "wherever the URL routes".
+        labels = self._labels("str_recursion")
+        contents = self._contents("str_recursion")
+        self.assertTrue(any("models.py" in label for label in labels))
+        models_content = next(c for l, c in contents.items() if "models.py" in l)
+        self.assertIn("def summary", models_content)
+
+    def test_unexpected_kwarg_falls_back_to_routed_view_and_names_post_id(self):
+        # The clearest regression case: the TypeError is raised in Django's
+        # own dispatch code (no project frame exists for it at all), so this
+        # must fall back to the routed view -- and the URL pattern must show
+        # post_id is real, which is exactly what the judge was missing.
+        contents = self._contents("unexpected_kwarg")
+        views_content = next(c for l, c in contents.items() if "views.py" in l)
+        self.assertIn("def post_preview", views_content)
+        self.assertIn("post_id", views_content)
+        urls_content = next(c for l, c in contents.items() if "urls.py" in l)
+        self.assertIn("post_id", urls_content)
 
     def test_fixture_with_templates_field_gets_extra_source(self):
-        fixture = FIXTURES_BY_NAME["unclosed_tag"]
-        sources = _build_judge_source(fixture)
-        labels = [label for label, _content in sources]
-        self.assertIn("blog/post_archive.html", labels)
-        contents = dict(sources)
-        self.assertIn("{% endfor %}", contents["blog/post_archive.html"])
+        labels = self._labels("url_name_typo")
+        contents = self._contents("url_name_typo")
+        self.assertIn("blog/related_posts.html", labels)
+        self.assertIn("post-detial", contents["blog/related_posts.html"])
 
-    def test_fixture_without_templates_field_gets_no_extra_source(self):
-        fixture = FIXTURES_BY_NAME["none_attribute"]
-        sources = _build_judge_source(fixture)
-        self.assertEqual(len(sources), 3)
+    def test_fixture_without_templates_field_gets_no_template_source(self):
+        labels = self._labels("none_attribute")
+        self.assertFalse(any(label.endswith(".html") for label in labels))
 
 
 class EvalHarnessEndToEndTest(unittest.TestCase):
