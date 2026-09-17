@@ -73,10 +73,10 @@ Sequencing below follows from that.
 ## Conditional or unscheduled
 
 - **Retrieval anchoring**: the eval harness showed RAG-on can anchor on an adjacent
-  retrieved chunk. unexpected_kwarg fabricated a post_id parameter from a different
-  URL pattern; missing_post_key redirected the fix to a retrieved template instead of
-  the view. Candidates: lower `EXPLAIN_ERRORS_RAG_TOP_K`, or tell the model which
-  retrieved chunk contains the failing frame. Test with the harness before and after.
+  retrieved chunk instead of the one that matters. missing_post_key redirected the fix
+  to a retrieved template instead of the view. Candidates: lower
+  `EXPLAIN_ERRORS_RAG_TOP_K`, or tell the model which retrieved chunk contains the
+  failing frame. Test with the harness before and after.
   Verify: a harness run recorded in evals/README.md compares the change.
 
 - **dedup-identical-errors**: LRU hash of exception type plus top frame, so repeated
@@ -191,6 +191,15 @@ Fold each into whichever branch already touches the relevant file.
   before any refactor of `middleware.py` touches that name.
   Verify: not applicable. Closes only if `evals/run.py`'s exception-capture mechanism changes
   to something other than patching `sanitize_traceback`.
+- The eval harness's judge sees only the traceback and `expected_cause` /
+  `expected_fix_location`, never the retrieved chunks. A correct detail RAG-on read from
+  source but that isn't restated in those known facts currently reads as unverified to the
+  judge, indistinguishable from a genuinely invented one (see evals/README.md's Results
+  section, unexpected_kwarg). The judge should see the retrieved chunks so it can verify
+  specifics against them rather than treating everything outside the traceback as
+  unverified. Fold into the next harness change.
+  Verify: `build_judge_prompt` in `evals/judge.py` includes the retrieved chunks in the
+  prompt it builds.
 
 ## Open strategic questions
 - Provider abstraction beyond OpenAI-compatible endpoints. The Anthropic compatibility layer

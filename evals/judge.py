@@ -62,8 +62,8 @@ above, by file and function?
 error?
 4. written_for_learner: Is it written for someone learning Django, rather \
 than assuming they already know the framework?
-5. no_fabrication: Does it avoid inventing function names, parameters, \
-files, or fix steps that do not appear in the traceback or the known facts?
+5. no_fabrication: Does it avoid stating function names, parameters, \
+files, or fix steps that contradict the traceback or the known facts?
 
 Then pick an overall winner: "A", "B", or "tie" if they are equally good. \
 Do not favor the longer or more confident-sounding explanation -- favor the \

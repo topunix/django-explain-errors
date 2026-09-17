@@ -185,10 +185,14 @@ Per-fixture win counts across the 3 runs:
 | unclosed_tag | B | 3 | 0 | 0 |
 
 `unexpected_kwarg` is the only fixture RAG-on didn't win outright -- one
-win, one loss, one tie, not a consistent loss. The loss is instructive: the
-judge favored RAG-off specifically for *not* inventing an unverified
-`post_id` parameter that RAG-on's answer had fabricated -- the exception
-that proves the rule rather than a hole in it.
+win, one loss, one tie, not a consistent loss. The loss is instructive for
+a different reason than it first looks: RAG-on's answer named `post_id`,
+which is in fact the correct kwarg for the failing route (confirmed
+against `evals/fixture_app/blog/urls.py` and `blog/views.py`), but the
+judge only sees the traceback and the known-good facts, neither of which
+mentions `post_id` -- so a correct detail RAG-on read from the source
+looked, to the judge, indistinguishable from an invented one. See the
+judge limitation noted below.
 
 Latency: p50 ~2s on both sides (rag-off 1.82s, rag-on 2.11s across all 90
 calls) -- RAG adds no meaningful overhead on top of the generator call
@@ -200,12 +204,20 @@ tends to invent plausible-sounding function names, parameters, and fix
 steps rather than say it doesn't know. With source access via RAG, it
 mostly does not -- in both groups, not just the one RAG was built for.
 
-In two fixtures across four total runs, RAG-on anchored on an adjacent
-retrieved chunk instead of the one that actually matters. `unexpected_kwarg`
-fabricated a `post_id` parameter from a different URL pattern; `missing_post_key`
-redirected the fix to a retrieved template instead of the view. Retrieval
-reduces fabrication; it does not eliminate it, and it introduces a new kind
-when the wrong chunk ranks high.
+`missing_post_key` shows RAG-on anchoring on an adjacent retrieved chunk
+instead of the one that actually matters: the judge's reasoning states
+directly that it redirected the fix to a retrieved template instead of the
+view. Retrieval reduces fabrication; it does not eliminate it, and it can
+introduce a new kind of error when the wrong chunk ranks high.
+
+**Known limitation of the current judge**: it sees only the traceback and
+`expected_cause` / `expected_fix_location`, never the retrieved source. A
+correct detail RAG-on pulled from source but that isn't restated in those
+known facts -- like `post_id` above -- reads as unverified to the judge in
+exactly the same way a genuinely invented detail would. The judge cannot
+currently tell "true but not in the known facts" apart from "fabricated."
+That's a harness limitation, not a generator finding; see the roadmap item
+to give the judge the retrieved chunks.
 
 ## Files
 
