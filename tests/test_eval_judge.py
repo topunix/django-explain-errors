@@ -1,6 +1,7 @@
 """Plumbing tests for the eval harness's judge (evals/judge.py).
 
-Fully mocked per docs/tasks/eval-harness.md section 6: no real API calls.
+Fully mocked, same as the rest of the eval harness's plumbing tests: no
+real API calls.
 """
 import json
 import unittest
@@ -30,12 +31,14 @@ VALID_RESPONSE = json.dumps(
             "points_to_fix_location": True,
             "fix_would_work": True,
             "written_for_learner": True,
+            "no_fabrication": True,
         },
         "b": {
             "identifies_cause": False,
             "points_to_fix_location": False,
             "fix_would_work": False,
             "written_for_learner": False,
+            "no_fabrication": False,
         },
         "winner": "A",
         "reasoning": "A is better.",
@@ -88,6 +91,12 @@ class ParseJudgeResponseTest(unittest.TestCase):
     def test_non_boolean_question_value_raises(self):
         payload = json.loads(VALID_RESPONSE)
         payload["a"]["fix_would_work"] = "yes"
+        with self.assertRaises(JudgeParseError):
+            parse_judge_response(json.dumps(payload))
+
+    def test_missing_no_fabrication_key_raises(self):
+        payload = json.loads(VALID_RESPONSE)
+        del payload["b"]["no_fabrication"]
         with self.assertRaises(JudgeParseError):
             parse_judge_response(json.dumps(payload))
 

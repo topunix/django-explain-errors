@@ -1,7 +1,8 @@
 """Plumbing tests for the eval harness's fixture registry (evals/fixtures.py).
 
-Fully mocked / subprocess-isolated per docs/tasks/eval-harness.md section 6.
-Nothing here hits a real API; nothing here is part of the harness itself.
+Fully mocked / subprocess-isolated, same as the rest of the eval harness's
+plumbing tests. Nothing here hits a real API; nothing here is part of the
+harness itself.
 """
 import json
 import os

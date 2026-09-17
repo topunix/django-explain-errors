@@ -52,9 +52,10 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 EXPLAIN_ERRORS_MAX_CALLS = 10_000
 EXPLAIN_ERRORS_WINDOW_SECONDS = 60
 
-# JSON 500 body carries the explanation text; see docs/tasks/eval-harness.md
-# section 3. Overridden per-pass by run.py, kept here as the on-disk default
-# so the fixture app is also usable interactively (`manage.py runserver`).
+# JSON 500 body carries the explanation text, which is how the harness reads
+# it back out. Overridden per-pass by run.py, kept here as the on-disk
+# default so the fixture app is also usable interactively (`manage.py
+# runserver`).
 EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False
 
 # RAG is off by default; run.py flips this on for the RAG-on pass and points
