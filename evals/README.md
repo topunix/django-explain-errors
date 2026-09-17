@@ -200,6 +200,13 @@ tends to invent plausible-sounding function names, parameters, and fix
 steps rather than say it doesn't know. With source access via RAG, it
 mostly does not -- in both groups, not just the one RAG was built for.
 
+In two fixtures across four total runs, RAG-on anchored on an adjacent
+retrieved chunk instead of the one that actually matters. `unexpected_kwarg`
+fabricated a `post_id` parameter from a different URL pattern; `missing_post_key`
+redirected the fix to a retrieved template instead of the view. Retrieval
+reduces fabrication; it does not eliminate it, and it introduces a new kind
+when the wrong chunk ranks high.
+
 ## Files
 
 - `fixture_app/` -- a small, deliberately breakable Django blog. A

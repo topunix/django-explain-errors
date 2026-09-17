@@ -45,7 +45,7 @@ Sequencing below follows from that.
    Verify: the README lead paragraph describes a grounded Django learning aid rather than an
    error explainer.
 
-4. **Debug page injection**: append the explanation into the debug page HTML rather than only
+3. **Debug page injection**: append the explanation into the debug page HTML rather than only
    stdout. The latency question is settled: eval harness measurements (`evals/README.md`'s
    Results section) put generator p50 at 1.8 to 2.1s, squarely inside the "build the blocking
    version" range the decision rule called for. Build the blocking version.
@@ -71,6 +71,13 @@ Sequencing below follows from that.
    Verify: `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` appears in `explain_errors/` on `main`.
 
 ## Conditional or unscheduled
+
+- **Retrieval anchoring**: the eval harness showed RAG-on can anchor on an adjacent
+  retrieved chunk. unexpected_kwarg fabricated a post_id parameter from a different
+  URL pattern; missing_post_key redirected the fix to a retrieved template instead of
+  the view. Candidates: lower `EXPLAIN_ERRORS_RAG_TOP_K`, or tell the model which
+  retrieved chunk contains the failing frame. Test with the harness before and after.
+  Verify: a harness run recorded in evals/README.md compares the change.
 
 - **dedup-identical-errors**: LRU hash of exception type plus top frame, so repeated
   identical errors do not burn the sliding-window throttle. Small, slot in anywhere.
