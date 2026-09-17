@@ -224,6 +224,20 @@ Fold each into whichever branch already touches the relevant file.
   sqlite-vec-dependent test in the suite. Fix it to skip the same way. Small, standalone;
   do before the next release.
   Verify: that test skips (not fails) in an environment without `sqlite-vec` installed.
+- Before 0.7.0, `process_exception`'s tail-slice built the traceback from `traceback.format_exc()`,
+  which reads `sys.exc_info()` for the current thread. On the async path that call runs inside
+  `sync_to_async`'s worker thread, and under a real ASGI server (uvicorn, daphne) that thread has
+  no reason to have `sys.exc_info()` populated, so it may have silently produced
+  `"NoneType: None"` instead of a real traceback for every async explanation. 0.7.0 fixed the
+  underlying cause (traceback building no longer touches `sys.exc_info()` at all) but the
+  pre-0.7.0 failure mode was never confirmed against a real server: `django.test.SimpleTestCase`'s
+  async test support bridges the test coroutine through `asgiref` in a way that happens to leave
+  `sys.exc_info()` populated on the worker thread regardless, masking the difference. Five-minute
+  check: run the fixture app under uvicorn or daphne on a pre-0.7.0 checkout, hit an async view
+  that raises, and read what actually got sent. If it was broken, note it in the 0.7.0 release
+  notes retroactively.
+  Verify: not applicable. Closes only once someone runs the check and, if warranted, the 0.7.0
+  release notes are amended.
 
 ## Open strategic questions
 - Provider abstraction beyond OpenAI-compatible endpoints. The Anthropic compatibility layer
