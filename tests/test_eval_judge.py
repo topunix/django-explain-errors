@@ -8,7 +8,13 @@ import unittest
 from unittest.mock import MagicMock
 
 from evals.fixtures import Fixture
-from evals.judge import JudgeParseError, compare, parse_judge_response
+from evals.judge import (
+    JudgeParseError,
+    build_judge_prompt,
+    compare,
+    format_source_section,
+    parse_judge_response,
+)
 
 
 def _make_fixture(**overrides):
@@ -113,6 +119,43 @@ class ParseJudgeResponseTest(unittest.TestCase):
             parse_judge_response(json.dumps(payload))
 
 
+class FormatSourceSectionTest(unittest.TestCase):
+
+    def test_renders_each_label_and_content(self):
+        rendered = format_source_section(
+            [("blog/views.py", "def f():\n    pass\n"), ("blog/models.py", "x = 1")]
+        )
+        self.assertIn("### blog/views.py", rendered)
+        self.assertIn("def f():", rendered)
+        self.assertIn("### blog/models.py", rendered)
+        self.assertIn("x = 1", rendered)
+        # views.py section comes first, in the order given.
+        self.assertLess(rendered.index("views.py"), rendered.index("models.py"))
+
+    def test_empty_sources_yields_placeholder_not_empty_string(self):
+        rendered = format_source_section([])
+        self.assertTrue(rendered)
+        self.assertNotIn("###", rendered)
+
+
+class BuildJudgePromptTest(unittest.TestCase):
+
+    def test_source_section_is_included(self):
+        fixture = _make_fixture()
+        prompt = build_judge_prompt("tb", fixture, "### blog/views.py\nreal source here", "a", "b")
+        self.assertIn("real source here", prompt)
+
+    def test_no_fabrication_question_cites_the_source_section(self):
+        fixture = _make_fixture()
+        prompt = build_judge_prompt("tb", fixture, "src", "a", "b")
+        self.assertIn(
+            "no_fabrication: Does it avoid stating function names, parameters, "
+            "files, or fix steps that are contradicted by the traceback, the "
+            "known facts, or the source shown above?",
+            prompt,
+        )
+
+
 class CompareRandomizationTest(unittest.TestCase):
 
     def test_rag_on_lands_in_position_a_roughly_half_the_time(self):
@@ -126,7 +169,7 @@ class CompareRandomizationTest(unittest.TestCase):
         a_count = sum(
             1
             for _ in range(n)
-            if compare(client, "judge-model", "tb", fixture, "off", "on", rng=rng)[
+            if compare(client, "judge-model", "tb", fixture, "src", "off", "on", rng=rng)[
                 "rag_on_is_a"
             ]
         )
@@ -139,7 +182,7 @@ class CompareRandomizationTest(unittest.TestCase):
         fixture = _make_fixture()
         client = _client_returning(VALID_RESPONSE)  # winner "A"
 
-        result = compare(client, "m", "tb", fixture, "off", "on", rng=_FixedRng(0.1))
+        result = compare(client, "m", "tb", fixture, "src", "off", "on", rng=_FixedRng(0.1))
 
         self.assertTrue(result["rag_on_is_a"])
         self.assertEqual(result["winner_side"], "rag_on")
@@ -148,7 +191,7 @@ class CompareRandomizationTest(unittest.TestCase):
         fixture = _make_fixture()
         client = _client_returning(VALID_RESPONSE)  # winner "A"
 
-        result = compare(client, "m", "tb", fixture, "off", "on", rng=_FixedRng(0.9))
+        result = compare(client, "m", "tb", fixture, "src", "off", "on", rng=_FixedRng(0.9))
 
         self.assertFalse(result["rag_on_is_a"])
         self.assertEqual(result["winner_side"], "rag_off")
@@ -159,7 +202,7 @@ class CompareRandomizationTest(unittest.TestCase):
         fixture = _make_fixture()
         client = _client_returning(json.dumps(payload))
 
-        result = compare(client, "m", "tb", fixture, "off", "on", rng=_FixedRng(0.1))
+        result = compare(client, "m", "tb", fixture, "src", "off", "on", rng=_FixedRng(0.1))
 
         self.assertTrue(result["rag_on_is_a"])
         self.assertEqual(result["winner_side"], "rag_off")
@@ -170,7 +213,7 @@ class CompareRandomizationTest(unittest.TestCase):
         fixture = _make_fixture()
         client = _client_returning(json.dumps(payload))
 
-        result = compare(client, "m", "tb", fixture, "off", "on", rng=_FixedRng(0.1))
+        result = compare(client, "m", "tb", fixture, "src", "off", "on", rng=_FixedRng(0.1))
 
         self.assertEqual(result["winner_side"], "tie")
 
@@ -181,7 +224,7 @@ class CompareJudgeFailureTest(unittest.TestCase):
         client = _client_returning("not json")
         fixture = _make_fixture()
 
-        result = compare(client, "m", "tb", fixture, "off", "on", rng=_FixedRng(0.1))
+        result = compare(client, "m", "tb", fixture, "src", "off", "on", rng=_FixedRng(0.1))
 
         self.assertTrue(result["judge_failure"])
         self.assertIsNotNone(result["error"])
@@ -193,7 +236,7 @@ class CompareJudgeFailureTest(unittest.TestCase):
         client.chat.completions.create.side_effect = RuntimeError("judge endpoint down")
         fixture = _make_fixture()
 
-        result = compare(client, "m", "tb", fixture, "off", "on", rng=_FixedRng(0.1))
+        result = compare(client, "m", "tb", fixture, "src", "off", "on", rng=_FixedRng(0.1))
 
         self.assertTrue(result["judge_failure"])
         self.assertIn("judge endpoint down", result["error"])

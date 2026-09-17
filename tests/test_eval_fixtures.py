@@ -45,6 +45,27 @@ class FixtureRegistryTest(unittest.TestCase):
             if fixture.method == "POST":
                 self.assertIsInstance(fixture.data, dict, fixture)
 
+    def test_templates_defaults_to_empty_tuple(self):
+        fixture = Fixture(
+            name="x",
+            url="/x/",
+            group="A",
+            expected_exception="ValueError",
+            expected_cause="c",
+            expected_fix_location="x.py:f",
+        )
+        self.assertEqual(fixture.templates, ())
+
+    def test_fixtures_naming_templates_point_to_real_files(self):
+        fixture_app_dir = os.path.join(REPO_ROOT, "evals", "fixture_app")
+        named_any = False
+        for fixture in FIXTURES:
+            for template_name in fixture.templates:
+                named_any = True
+                path = os.path.join(fixture_app_dir, "blog", "templates", template_name)
+                self.assertTrue(os.path.isfile(path), (fixture.name, template_name))
+        self.assertTrue(named_any, "expected at least one fixture to name a template")
+
     def test_invalid_group_is_rejected(self):
         with self.assertRaises(ValueError):
             Fixture(

@@ -10,7 +10,8 @@ import subprocess
 import sys
 import unittest
 
-from evals.run import estimate_cost_usd, tally_judgments, tally_latency, tally_usage
+from evals.fixtures import FIXTURES_BY_NAME
+from evals.run import _build_judge_source, estimate_cost_usd, tally_judgments, tally_latency, tally_usage
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -143,6 +144,30 @@ class TallyLatencyAndUsageTest(unittest.TestCase):
     def test_estimate_cost_for_known_model(self):
         cost = estimate_cost_usd("gpt-4o-mini", 1000, 1000)
         self.assertAlmostEqual(cost, 0.00015 + 0.0006)
+
+
+class BuildJudgeSourceTest(unittest.TestCase):
+
+    def test_always_includes_views_models_and_urls(self):
+        fixture = FIXTURES_BY_NAME["none_attribute"]
+        sources = _build_judge_source(fixture)
+        labels = [label for label, _content in sources]
+        self.assertEqual(labels, ["blog/views.py", "blog/models.py", "blog/urls.py"])
+        contents = dict(sources)
+        self.assertIn("def latest_post", contents["blog/views.py"])
+
+    def test_fixture_with_templates_field_gets_extra_source(self):
+        fixture = FIXTURES_BY_NAME["unclosed_tag"]
+        sources = _build_judge_source(fixture)
+        labels = [label for label, _content in sources]
+        self.assertIn("blog/post_archive.html", labels)
+        contents = dict(sources)
+        self.assertIn("{% endfor %}", contents["blog/post_archive.html"])
+
+    def test_fixture_without_templates_field_gets_no_extra_source(self):
+        fixture = FIXTURES_BY_NAME["none_attribute"]
+        sources = _build_judge_source(fixture)
+        self.assertEqual(len(sources), 3)
 
 
 class EvalHarnessEndToEndTest(unittest.TestCase):

@@ -32,8 +32,9 @@ JUDGE_PROMPT_TEMPLATE = """\
 You are evaluating two AI-generated explanations of the same Django error, \
 written for a developer who is still learning Django. Decide which \
 explanation is more useful. You do not know which explanation (if either) \
-had access to the project's source code when it was written -- judge only \
-what is written.
+had access to the project's source code when it was written -- both are \
+checked against the same source, shown below, so its presence can't tell \
+you which is which.
 
 ## Traceback
 
@@ -43,6 +44,10 @@ what is written.
 
 Cause: {expected_cause}
 Where the fix belongs: {expected_fix_location}
+
+## Relevant project source
+
+{source}
 
 ## Explanation A
 
@@ -63,7 +68,8 @@ error?
 4. written_for_learner: Is it written for someone learning Django, rather \
 than assuming they already know the framework?
 5. no_fabrication: Does it avoid stating function names, parameters, \
-files, or fix steps that contradict the traceback or the known facts?
+files, or fix steps that are contradicted by the traceback, the known \
+facts, or the source shown above?
 
 Then pick an overall winner: "A", "B", or "tie" if they are equally good. \
 Do not favor the longer or more confident-sounding explanation -- favor the \
@@ -113,11 +119,28 @@ def get_judge_model():
     return model
 
 
-def build_judge_prompt(traceback_text, fixture, explanation_a, explanation_b):
+def format_source_section(sources):
+    """Render (label, content) pairs -- e.g. [("blog/views.py", "..."), ...]
+    -- into the judge prompt's "Relevant project source" block.
+
+    Callers (see evals/run.py) always pass the same fixed set of modules
+    plus whatever a fixture's own `templates` field names, for every
+    comparison, regardless of which side had RAG -- so the shape of this
+    section itself can't tip the judge off.
+    """
+    if not sources:
+        return "(no project source available)"
+    return "\n\n".join(
+        f"### {label}\n```\n{content.rstrip()}\n```" for label, content in sources
+    )
+
+
+def build_judge_prompt(traceback_text, fixture, source_text, explanation_a, explanation_b):
     return JUDGE_PROMPT_TEMPLATE.format(
         traceback=traceback_text,
         expected_cause=fixture.expected_cause,
         expected_fix_location=fixture.expected_fix_location,
+        source=source_text,
         explanation_a=explanation_a or "(no explanation was produced)",
         explanation_b=explanation_b or "(no explanation was produced)",
     )
@@ -167,11 +190,17 @@ def compare(
     model,
     traceback_text,
     fixture,
+    source_text,
     rag_off_explanation,
     rag_on_explanation,
     rng=None,
 ):
     """Judge rag_off vs rag_on for one fixture call.
+
+    `source_text` (see format_source_section) is the same for both sides of
+    this comparison -- it exists so the judge can verify a specific claim
+    against real source instead of treating anything outside the traceback
+    and known facts as unverifiable.
 
     Returns a dict recording which side won ("rag_on", "rag_off", or "tie"),
     the randomized A/B mapping (`rag_on_is_a`), and the raw per-question
@@ -185,7 +214,7 @@ def compare(
     else:
         explanation_a, explanation_b = rag_off_explanation, rag_on_explanation
 
-    prompt = build_judge_prompt(traceback_text, fixture, explanation_a, explanation_b)
+    prompt = build_judge_prompt(traceback_text, fixture, source_text, explanation_a, explanation_b)
 
     try:
         response = client.chat.completions.create(

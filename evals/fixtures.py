@@ -31,6 +31,12 @@ class Fixture:
     expected_fix_location: str
     method: str = "GET"
     data: Optional[dict] = field(default=None)
+    # Template names (as passed to render(), e.g. "blog/post_archive.html"),
+    # for fixtures whose bug lives in a template's own content rather than in
+    # views.py/models.py/urls.py. Sent to the judge alongside those three
+    # modules -- see evals/judge.py and evals/run.py's _build_judge_source.
+    # Most fixtures don't need this; the three modules already cover them.
+    templates: tuple = field(default_factory=tuple)
 
     def __post_init__(self):
         if self.group not in ("A", "B"):
@@ -176,6 +182,7 @@ FIXTURES = [
             "of the registered URL name 'post-detail'"
         ),
         expected_fix_location="blog/templates/blog/related_posts.html",
+        templates=("blog/related_posts.html",),
     ),
     Fixture(
         name="missing_tag_library",
@@ -209,6 +216,7 @@ FIXTURES = [
             "closes it with {% endif %} before {% endfor %}"
         ),
         expected_fix_location="blog/templates/blog/post_archive.html",
+        templates=("blog/post_archive.html",),
     ),
 ]
 
