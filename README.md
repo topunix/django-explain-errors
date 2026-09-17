@@ -10,7 +10,8 @@ a local model if you prefer not to send code off your machine.
 
 It can optionally ground explanations in your own project source using a
 local vector index (RAG), so explanations reference the actual code that
-failed instead of staying generic.
+failed instead of staying generic (measured — see "Does RAG actually
+help?" below).
 
 The middleware supports both synchronous (WSGI) and asynchronous (ASGI)
 views. It auto-detects the view chain at startup and routes requests through
@@ -317,19 +318,98 @@ else.)
 
 ### Before / after
 
+A real result from the eval harness (`missing_fk`, one of the fixtures in
+`evals/fixtures.py`): a view creates a new `Post` without setting the
+required `author` foreign key. The traceback the model actually received
+was already truncated to `OPENAI_MAX_TRACEBACK_CHARS`, so it contains no
+application code at all, only Django/SQLite internals:
+
+```
+...(truncated)...
+  File ".../django/db/models/base.py", line 904, in save
+    self.save_base(
+  ...
+  File ".../django/db/backends/utils.py", line 105, in _execute
+    return self.cursor.execute(sql, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File ".../django/db/backends/sqlite3/base.py", line 359, in execute
+    return super().execute(query, params)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+django.db.utils.IntegrityError: NOT NULL constraint failed: blog_post.author_id
+```
+
 **Without RAG**, traceback only:
 
-> Your `ValueError` is raised because the value passed to `foo()` couldn't
-> be converted to an integer. Check where `foo()` is called and make sure
-> you're passing a numeric string.
+> The error "django.db.utils.IntegrityError: NOT NULL constraint failed: blog_post.author_id" occurs when you attempt to save a model instance but the `author_id` field does not receive a value, even though it requires one (is defined as `NOT NULL`).
+>
+> This typically indicates that the `author` field in your `Post` model (or similar) is mandatory, but you did not provide an `author` when creating or updating the post.
+>
+> To fix this:
+>
+> 1. Ensure that you are assigning a valid user or author instance to the `author` field before saving the `Post` model. For example:
+>    ```python
+>    post.author = some_user_instance
+>    ```
+>
+> 2. If you intended for `author_id` to be optional, adjust the model definition to allow null values by modifying the field:
+>    ```python
+>    author = models.ForeignKey(User, on_delete=models.CASCADE, null=True)
+>    ```
+>
+> 3. If the migration is necessary (if you did change the model), run:
+>    ```bash
+>    python manage.py makemigrations
+>    python manage.py migrate
+>    ```
+>
+> Make sure that every time you save a `Post`, it has a valid author assigned.
 
 **With RAG**, grounded in the actual function:
 
-> In `myapp/utils.py`, `foo()` calls `int(value)` on line 12 without a
-> `try`/`except`, so any non-numeric `value` raises `ValueError` straight
-> through to the caller. Since `foo()` is called from `myapp/views.py` with
-> unvalidated form input, add validation there or wrap the `int()` call in
-> `foo()` with a clear error message.
+> The error `django.db.utils.IntegrityError: NOT NULL constraint failed: blog_post.author_id` occurs because when you're creating a new `Post` instance in `clone_latest_post`, you're not providing an `author` for the new draft. The `author` field in the `Post` model is a ForeignKey that cannot be null, and thus must be populated.
+>
+> To fix this, modify the `clone_latest_post` function to include an `author` when creating the draft. You could retrieve the author from the latest post and use it like so:
+>
+> ```python
+> def clone_latest_post(request):
+>     """Duplicate the most recent post as a new draft, ready for editing."""
+>     latest = Post.objects.order_by("-id").first()
+>     draft = Post.objects.create(
+>         title=f"Copy of {latest.title}",
+>         slug=f"copy-of-{latest.slug}",
+>         body=latest.body,
+>         author=latest.author,  # Add this line to specify the author
+>     )
+>     return HttpResponse(f"Created draft #{draft.id}")
+> ```
+>
+> This ensures the `draft` has a valid `author`, satisfying the NOT NULL constraint.
+
+### Does RAG actually help?
+
+To check whether RAG-grounded explanations are actually better, not just
+longer, the package ships an eval harness (`evals/`): fifteen deliberately
+broken Django views, each explained twice — once from the traceback alone,
+once with RAG enabled — and judged by a separate model, blind to which
+explanation is which, against the error's known cause and correct fix
+location. Which side the judge sees as "A" is randomized per comparison so
+position can't bias the result.
+
+Across three runs (45 judged comparisons), RAG-on won 39, including ten of
+the fifteen fixtures three-for-three. The gap isn't spread evenly across
+everything the judge checks — it's concentrated in whether the explanation
+names the right file and function. Without source access, `gpt-4o-mini`
+tends to invent a plausible-sounding function name or parameter rather than
+say it doesn't know; given the actual code via RAG, it mostly does not.
+
+Two limitations are worth knowing before trusting this uncritically: RAG
+can anchor on the wrong retrieved chunk, as it did in one fixture
+(`missing_post_key`) where the fix got redirected to a retrieved template
+instead of the view; and the judge itself sees only the traceback and the
+known facts, not the retrieved source, so a detail RAG-on read correctly
+from code can look just as unverified to the judge as one it invented. Full
+per-fixture results, the judge prompt, and how to reproduce this (about two
+cents a pass) are in [`evals/README.md`](evals/README.md).
 
 ## Example
 
