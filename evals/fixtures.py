@@ -1,10 +1,18 @@
 """The fixture registry: one record per Django failure the eval harness
 drives through the fixture app in evals/fixture_app/.
 
-Group A: RAG is predicted to help, because the cause lives in the app's own
-source (something retrieval can surface).
-Group B: RAG is predicted to be neutral, because the traceback already says
-everything a fix needs.
+Group A: the cause lives in the app's own source -- a bad queryset lookup,
+a missing null check, a broken model method -- something retrieval can
+surface and a traceback-only explanation cannot.
+Group B: the traceback text itself already names the cause -- a typo'd
+template name, a missing tag library, a bad import -- with no extra source
+context required to identify it.
+
+Three runs (see evals/README.md's Results section) show RAG-on winning both
+groups, and by a wider margin in group B than in group A -- so group B is
+not a RAG-neutral control, it's simply a different class of error, and one
+where a traceback-only explanation fabricates specifics more often, not
+less.
 
 `expected_fix_location` is `file:function`, not a line number, since line
 numbers shift as the fixture app changes.

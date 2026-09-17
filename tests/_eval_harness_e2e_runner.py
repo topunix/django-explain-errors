@@ -18,9 +18,9 @@ from unittest.mock import MagicMock, patch
 
 JUDGE_RESPONSE_TEXT = (
     '{"a": {"identifies_cause": true, "points_to_fix_location": true, '
-    '"fix_would_work": true, "written_for_learner": true}, '
+    '"fix_would_work": true, "written_for_learner": true, "no_fabrication": true}, '
     '"b": {"identifies_cause": true, "points_to_fix_location": false, '
-    '"fix_would_work": true, "written_for_learner": false}, '
+    '"fix_would_work": true, "written_for_learner": false, "no_fabrication": true}, '
     '"winner": "A", "reasoning": "A names the cause and the fix location; B does not."}'
 )
 

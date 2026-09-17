@@ -1,7 +1,7 @@
 """Plumbing tests for the eval harness's entry point (evals/run.py).
 
-Fully mocked / subprocess-isolated per docs/tasks/eval-harness.md section 6:
-no real API calls anywhere in this file.
+Fully mocked / subprocess-isolated, same as the rest of the eval harness's
+plumbing tests: no real API calls anywhere in this file.
 """
 import glob
 import json
@@ -28,6 +28,7 @@ def _judgment(group, winner_side, rag_on_is_a=True, judge_failure=False, a=None,
             "points_to_fix_location": True,
             "fix_would_work": True,
             "written_for_learner": True,
+            "no_fabrication": True,
         },
         "b": b
         if b is not None
@@ -36,6 +37,7 @@ def _judgment(group, winner_side, rag_on_is_a=True, judge_failure=False, a=None,
             "points_to_fix_location": False,
             "fix_would_work": False,
             "written_for_learner": False,
+            "no_fabrication": False,
         },
     }
 
@@ -81,6 +83,8 @@ class TallyJudgmentsTest(unittest.TestCase):
         q = result["question_yes_counts_by_group"]["A"]
         self.assertEqual(q["rag_on"]["identifies_cause"], 1)
         self.assertEqual(q["rag_off"]["identifies_cause"], 0)
+        self.assertEqual(q["rag_on"]["no_fabrication"], 1)
+        self.assertEqual(q["rag_off"]["no_fabrication"], 0)
 
         # rag_on_is_a=False: judge's "b" answers now describe the RAG-on side.
         result = tally_judgments([_judgment("A", "rag_off", rag_on_is_a=False)])
@@ -145,7 +149,7 @@ class EvalHarnessEndToEndTest(unittest.TestCase):
     """Runs evals.run.main() in a subprocess with the generator (chat +
     embeddings) and the judge fully mocked
     (tests/_eval_harness_e2e_runner.py), and asserts the results file it
-    writes has the shape docs/tasks/eval-harness.md section 5 describes.
+    writes has the shape evals/run.py's main() actually produces.
 
     This is the harness's proof of runnability per section 6: the real
     OpenAI and judge APIs are unavailable in this environment, so this is

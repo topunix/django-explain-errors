@@ -3,7 +3,8 @@ compares a RAG-off and a RAG-on explanation of the same fixture failure
 against the fixture's known-good facts.
 
 Client config is read from the environment and is never shared with the
-generator's OPENAI_* settings (see docs/tasks/eval-harness.md section 4):
+generator's OPENAI_* settings (see evals/README.md's Environment variables
+section):
 
     EVAL_JUDGE_BASE_URL   e.g. an OpenRouter-compatible endpoint
     EVAL_JUDGE_API_KEY
@@ -21,6 +22,7 @@ QUESTION_KEYS = (
     "points_to_fix_location",
     "fix_would_work",
     "written_for_learner",
+    "no_fabrication",
 )
 
 # Module-level and easy to edit: the maintainer will iterate on this once
@@ -60,6 +62,8 @@ above, by file and function?
 error?
 4. written_for_learner: Is it written for someone learning Django, rather \
 than assuming they already know the framework?
+5. no_fabrication: Does it avoid stating function names, parameters, \
+files, or fix steps that contradict the traceback or the known facts?
 
 Then pick an overall winner: "A", "B", or "tie" if they are equally good. \
 Do not favor the longer or more confident-sounding explanation -- favor the \
@@ -68,8 +72,8 @@ one that is more correct and more useful to a learner.
 Respond with ONLY a JSON object, no other text, in exactly this shape:
 
 {{
-  "a": {{"identifies_cause": true, "points_to_fix_location": false, "fix_would_work": true, "written_for_learner": true}},
-  "b": {{"identifies_cause": true, "points_to_fix_location": true, "fix_would_work": true, "written_for_learner": false}},
+  "a": {{"identifies_cause": true, "points_to_fix_location": false, "fix_would_work": true, "written_for_learner": true, "no_fabrication": true}},
+  "b": {{"identifies_cause": true, "points_to_fix_location": true, "fix_would_work": true, "written_for_learner": false, "no_fabrication": false}},
   "winner": "B",
   "reasoning": "One sentence explaining the winner."
 }}

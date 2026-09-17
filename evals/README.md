@@ -100,22 +100,21 @@ debugging one failure without paying for the other 14.
 
 ## Reading the summary
 
-The headline is the **group split**, not the aggregate. Fixtures are
-labeled with a prediction:
+Read the win counts **per group**, not just the aggregate -- the aggregate
+hides which class of error RAG actually helps with. Fixtures split into two
+groups by where the cause lives:
 
-- **Group A** (10 fixtures): RAG is predicted to help, because the cause of
-  the failure lives in the app's own source -- something the RAG index can
-  retrieve and RAG-off cannot see at all.
-- **Group B** (5 fixtures): RAG is predicted to be neutral, because the
-  traceback already says everything a fix needs (a typo'd template name, a
-  missing `{% endif %}`) and there is no extra source context that would
-  change the answer.
+- **Group A** (10 fixtures): the cause lives in the app's own source -- a
+  bad queryset lookup, a missing null check, a broken model method --
+  something the RAG index can retrieve and RAG-off cannot see at all.
+- **Group B** (5 fixtures): the traceback itself already names the cause --
+  a typo'd template name, a missing tag library, a bad import -- with no
+  extra source context needed to identify it.
 
-A result like "RAG won 8 of 10 in group A and 1 of 5 in group B" confirms
-the hypothesis RAG was built on. A result like "RAG won 5 of 10 in group A"
-means RAG isn't earning its cost and latency even where it was expected to
-help. The aggregate win count across both groups hides this distinction, so
-don't read it as the result -- read the two group lines.
+See the Results section below for what three runs actually show: RAG-on won
+convincingly in both groups, and by a wider margin in group B than in group
+A. Group B was designed as a RAG-neutral control; the data says it isn't
+one.
 
 Below the win counts:
 
@@ -140,6 +139,85 @@ A judge response that doesn't parse (see `evals/judge.py:parse_judge_response`)
 is recorded as a judge failure, counted separately, and excluded from the
 win counts and per-question tallies -- it is never silently dropped and
 never counted as a tie.
+
+## Results
+
+First real evidence from this harness: 3 runs against `gpt-4o-mini`
+(`evals/results/20260916T235351Z.json`, git SHA
+`843da72b74778644c9c1596184e590798b14f8f4`; see also the earlier 1-run
+pass, `evals/results/20260916T233441Z.json`, same SHA).
+
+**RAG-on won 39 of 45 judged comparisons** (4 rag-off, 2 tie):
+
+| Group | RAG-on | RAG-off | Tie |
+|---|---|---|---|
+| A (10 fixtures x 3 runs) | 25 | 3 | 2 |
+| B (5 fixtures x 3 runs) | 14 | 1 | 0 |
+
+`points_to_fix_location` is the discriminator, not `identifies_cause` or
+`written_for_learner` (both sides answer those correctly almost every
+time). RAG-on names the actual file and function; RAG-off, with only the
+traceback, usually can't:
+
+| Group | RAG-on says yes | RAG-off says yes |
+|---|---|---|
+| A | 21 / 30 | 6 / 30 |
+| B | 12 / 15 | 8 / 15 |
+
+Per-fixture win counts across the 3 runs:
+
+| Fixture | Group | RAG-on | RAG-off | Tie |
+|---|---|---|---|---|
+| none_attribute | A | 3 | 0 | 0 |
+| str_recursion | A | 3 | 0 | 0 |
+| bad_lookup | A | 2 | 0 | 1 |
+| missing_profile | A | 3 | 0 | 0 |
+| non_unique_get | A | 3 | 0 | 0 |
+| unexpected_kwarg | A | 1 | 1 | 1 |
+| unvalidated_int | A | 2 | 1 | 0 |
+| missing_fk | A | 3 | 0 | 0 |
+| missing_post_key | A | 2 | 1 | 0 |
+| get_not_404 | A | 3 | 0 | 0 |
+| template_typo | B | 2 | 1 | 0 |
+| url_name_typo | B | 3 | 0 | 0 |
+| missing_tag_library | B | 3 | 0 | 0 |
+| import_typo | B | 3 | 0 | 0 |
+| unclosed_tag | B | 3 | 0 | 0 |
+
+`unexpected_kwarg` is the only fixture RAG-on didn't win outright -- one
+win, one loss, one tie, not a consistent loss. The loss is instructive for
+a different reason than it first looks: RAG-on's answer named `post_id`,
+which is in fact the correct kwarg for the failing route (confirmed
+against `evals/fixture_app/blog/urls.py` and `blog/views.py`), but the
+judge only sees the traceback and the known-good facts, neither of which
+mentions `post_id` -- so a correct detail RAG-on read from the source
+looked, to the judge, indistinguishable from an invented one. See the
+judge limitation noted below.
+
+Latency: p50 ~2s on both sides (rag-off 1.82s, rag-on 2.11s across all 90
+calls) -- RAG adds no meaningful overhead on top of the generator call
+itself. Cost: about $0.02 in generator tokens for a full `--runs 3` pass
+(54k prompt + 19k completion tokens at `gpt-4o-mini` pricing).
+
+The plain finding: without access to the project's source, `gpt-4o-mini`
+tends to invent plausible-sounding function names, parameters, and fix
+steps rather than say it doesn't know. With source access via RAG, it
+mostly does not -- in both groups, not just the one RAG was built for.
+
+`missing_post_key` shows RAG-on anchoring on an adjacent retrieved chunk
+instead of the one that actually matters: the judge's reasoning states
+directly that it redirected the fix to a retrieved template instead of the
+view. Retrieval reduces fabrication; it does not eliminate it, and it can
+introduce a new kind of error when the wrong chunk ranks high.
+
+**Known limitation of the current judge**: it sees only the traceback and
+`expected_cause` / `expected_fix_location`, never the retrieved source. A
+correct detail RAG-on pulled from source but that isn't restated in those
+known facts -- like `post_id` above -- reads as unverified to the judge in
+exactly the same way a genuinely invented detail would. The judge cannot
+currently tell "true but not in the known facts" apart from "fabricated."
+That's a harness limitation, not a generator finding; see the roadmap item
+to give the judge the retrieved chunks.
 
 ## Files
 
