@@ -383,7 +383,8 @@ def judge_all(fixtures, calls, exceptions_by_fixture):
 
 def tally_judgments(judgments):
     """Given a (possibly hand-built) list of judgment records, return win
-    counts and per-question yes counts, each split by fixture group.
+    counts, per-question yes counts, and per-side claim counts, each split
+    by fixture group.
     """
     from evals.judge import QUESTION_KEYS
 
@@ -396,6 +397,13 @@ def tally_judgments(judgments):
             "rag_off": {key: 0 for key in QUESTION_KEYS},
         }
         for group in ("A", "B")
+    }
+    # Claim counts surface an all-empty judge run (every no_fabrication
+    # derives to true because nothing was ever checked) without opening the
+    # results JSON -- see compare()'s _explanation_states_specific_details
+    # guard for the per-comparison version of the same concern.
+    claim_counts_by_group = {
+        group: {"rag_on": 0, "rag_off": 0} for group in ("A", "B")
     }
     judge_failures = 0
 
@@ -416,9 +424,13 @@ def tally_judgments(judgments):
             if rag_off_answers[key]:
                 questions_by_group[group]["rag_off"][key] += 1
 
+        claim_counts_by_group[group]["rag_on"] += len(rag_on_answers.get("claims") or [])
+        claim_counts_by_group[group]["rag_off"] += len(rag_off_answers.get("claims") or [])
+
     return {
         "wins_by_group": wins_by_group,
         "question_yes_counts_by_group": questions_by_group,
+        "claim_counts_by_group": claim_counts_by_group,
         "judge_failures": judge_failures,
     }
 
@@ -489,6 +501,12 @@ def print_summary(fixtures, calls, judgments, generator_model, judge_model):
         q = tallied["question_yes_counts_by_group"][group]
         for key in q["rag_on"]:
             print(f"    {key:24} rag_on={q['rag_on'][key]:<4} rag_off={q['rag_off'][key]}")
+
+    print()
+    print("Claims recorded per side (0 across the board means the judge never checked):")
+    for group in ("A", "B"):
+        c = tallied["claim_counts_by_group"][group]
+        print(f"  Group {group}: rag_on={c['rag_on']:<4} rag_off={c['rag_off']}")
 
     print()
     print("Latency:")

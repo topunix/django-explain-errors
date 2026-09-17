@@ -24,6 +24,7 @@ def _judgment(group, winner_side, rag_on_is_a=True, judge_failure=False, a=None,
         "a": a
         if a is not None
         else {
+            "claims": [],
             "identifies_cause": True,
             "points_to_fix_location": True,
             "fix_would_work": True,
@@ -33,6 +34,7 @@ def _judgment(group, winner_side, rag_on_is_a=True, judge_failure=False, a=None,
         "b": b
         if b is not None
         else {
+            "claims": [],
             "identifies_cause": False,
             "points_to_fix_location": False,
             "fix_would_work": False,
@@ -96,6 +98,47 @@ class TallyJudgmentsTest(unittest.TestCase):
         result = tally_judgments([])
         self.assertEqual(result["wins_by_group"]["A"], {"rag_on": 0, "rag_off": 0, "tie": 0})
         self.assertEqual(result["judge_failures"], 0)
+        self.assertEqual(result["claim_counts_by_group"]["A"], {"rag_on": 0, "rag_off": 0})
+
+    def test_claim_counts_follow_rag_on_off_not_raw_a_b(self):
+        a = {
+            "claims": [{"claim": "x", "status": "verified"}, {"claim": "y", "status": "absent"}],
+            "identifies_cause": True,
+            "points_to_fix_location": True,
+            "fix_would_work": True,
+            "written_for_learner": True,
+            "no_fabrication": True,
+        }
+        b = {
+            "claims": [{"claim": "z", "status": "verified"}],
+            "identifies_cause": False,
+            "points_to_fix_location": False,
+            "fix_would_work": False,
+            "written_for_learner": False,
+            "no_fabrication": False,
+        }
+
+        # rag_on_is_a=True: a's two claims describe the RAG-on side.
+        result = tally_judgments([_judgment("A", "rag_on", rag_on_is_a=True, a=a, b=b)])
+        self.assertEqual(result["claim_counts_by_group"]["A"], {"rag_on": 2, "rag_off": 1})
+
+        # rag_on_is_a=False: b's one claim now describes the RAG-on side.
+        result = tally_judgments([_judgment("A", "rag_off", rag_on_is_a=False, a=a, b=b)])
+        self.assertEqual(result["claim_counts_by_group"]["A"], {"rag_on": 1, "rag_off": 2})
+
+    def test_judge_failures_do_not_count_toward_claims(self):
+        judgments = [
+            {
+                "group": "A",
+                "judge_failure": True,
+                "winner_side": None,
+                "rag_on_is_a": True,
+                "a": None,
+                "b": None,
+            }
+        ]
+        result = tally_judgments(judgments)
+        self.assertEqual(result["claim_counts_by_group"]["A"], {"rag_on": 0, "rag_off": 0})
 
 
 class TallyLatencyAndUsageTest(unittest.TestCase):
@@ -320,3 +363,16 @@ class EvalHarnessEndToEndTest(unittest.TestCase):
             self.assertTrue(judgment_keys.issubset(judgment.keys()), judgment)
             self.assertFalse(judgment["judge_failure"])
             self.assertIn(judgment["winner_side"], ("rag_on", "rag_off", "tie"))
+            # The core regression this guards against: claims (see
+            # _eval_harness_e2e_runner.py's JUDGE_RESPONSE_TEXT) surviving
+            # compare() -> the results dict -> json.dumps -> disk -> back.
+            self.assertEqual(
+                judgment["a"]["claims"],
+                [{"claim": "the fix is in the view function", "status": "verified"}],
+            )
+            self.assertEqual(
+                judgment["b"]["claims"],
+                [{"claim": "the fix is elsewhere", "status": "contradicted"}],
+            )
+            self.assertTrue(judgment["a"]["no_fabrication"])
+            self.assertFalse(judgment["b"]["no_fabrication"])

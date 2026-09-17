@@ -16,6 +16,7 @@ position bias can't leak into the win counts.
 """
 import json
 import random
+import re
 
 QUESTION_KEYS = (
     "identifies_cause",
@@ -37,6 +38,26 @@ JUDGE_ASKED_KEYS = (
 )
 
 CLAIM_STATUSES = ("verified", "contradicted", "absent")
+
+# Cheap signals that an explanation asserts something specific enough that
+# an empty claims list means the judge skipped the lookup step, not that
+# there was nothing to check. Deliberately permissive (a few false
+# positives on prose that merely mentions a word matching one of these are
+# fine) -- the cost of a false positive is one avoidable judge_failure; the
+# cost of a false negative is exactly the silent "empty claims = clean
+# pass" bug this guards against.
+_CODE_SPECIFIC_PATTERNS = (
+    re.compile(r"`[^`]+`"),  # a backtick-quoted code span
+    re.compile(r"\b[a-zA-Z_][a-zA-Z0-9_]*\("),  # a function_call(
+    re.compile(r"\b\w+\.(?:py|html|txt|js|css)\b"),  # a named file
+)
+
+
+def _explanation_states_specific_details(explanation_text):
+    if not explanation_text:
+        return False
+    return any(pattern.search(explanation_text) for pattern in _CODE_SPECIFIC_PATTERNS)
+
 
 # Module-level and easy to edit: the maintainer will iterate on this once
 # real judge output is available. Keep the JSON shape in sync with
@@ -247,6 +268,19 @@ def parse_judge_response(raw_text):
     return parsed
 
 
+SIDE_RESULT_KEYS = ("claims",) + QUESTION_KEYS
+
+
+def _side_result(side_value):
+    """Build the per-side result dict explicitly, field by field, rather
+    than passing `side_value` through as-is: a future change to what
+    parse_judge_response returns should have to touch this list to change
+    what lands in the results file, instead of "claims" (or anything else)
+    silently riding along or silently dropping out.
+    """
+    return {key: side_value[key] for key in SIDE_RESULT_KEYS}
+
+
 def _winner_side(winner, rag_on_is_a):
     if winner == "tie":
         return "tie"
@@ -292,6 +326,18 @@ def compare(
         )
         raw_text = response.choices[0].message.content
         parsed = parse_judge_response(raw_text)
+
+        # Guard against the "empty claims list" version of a skipped lookup:
+        # no_fabrication derives to true when claims is [], which is
+        # indistinguishable from "checked and found nothing wrong" unless we
+        # also check whether there was obviously something to check.
+        for side, explanation in (("a", explanation_a), ("b", explanation_b)):
+            if not parsed[side]["claims"] and _explanation_states_specific_details(explanation):
+                raise JudgeParseError(
+                    f"{side}'s explanation states specific, checkable details "
+                    "but the judge returned an empty claims list for it -- "
+                    "treating this as a skipped lookup, not a clean pass"
+                )
     except Exception as exc:
         return {
             "fixture": fixture.name,
@@ -315,7 +361,7 @@ def compare(
         "rag_on_is_a": rag_on_is_a,
         "winner": winner,
         "winner_side": _winner_side(winner, rag_on_is_a),
-        "a": parsed["a"],
-        "b": parsed["b"],
+        "a": _side_result(parsed["a"]),
+        "b": _side_result(parsed["b"]),
         "reasoning": parsed["reasoning"],
     }
