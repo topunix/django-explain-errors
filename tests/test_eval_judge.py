@@ -9,7 +9,9 @@ from unittest.mock import MagicMock
 
 from evals.fixtures import Fixture
 from evals.judge import (
+    SIDE_RESULT_KEYS,
     JudgeParseError,
+    _explanation_states_specific_details,
     build_judge_prompt,
     compare,
     format_source_section,
@@ -285,3 +287,107 @@ class CompareJudgeFailureTest(unittest.TestCase):
 
         self.assertTrue(result["judge_failure"])
         self.assertIn("judge endpoint down", result["error"])
+
+
+class CompareIncludesClaimsInResultTest(unittest.TestCase):
+    """Regression coverage for claims not reaching the results file: assert
+    the actual dict compare() returns, not just that parsing didn't raise.
+    """
+
+    def test_claims_are_present_in_both_sides_of_the_result(self):
+        fixture = _make_fixture()
+        client = _client_returning(VALID_RESPONSE)
+
+        result = compare(client, "m", "tb", fixture, "src", "off", "on", rng=_FixedRng(0.1))
+
+        self.assertEqual(
+            result["a"]["claims"], [{"claim": "the fix is in sample()", "status": "verified"}]
+        )
+        self.assertEqual(
+            result["b"]["claims"],
+            [{"claim": "the fix is in some_other_func()", "status": "contradicted"}],
+        )
+
+    def test_result_sides_have_exactly_the_expected_keys(self):
+        fixture = _make_fixture()
+        client = _client_returning(VALID_RESPONSE)
+
+        result = compare(client, "m", "tb", fixture, "src", "off", "on", rng=_FixedRng(0.1))
+
+        self.assertEqual(set(result["a"].keys()), set(SIDE_RESULT_KEYS))
+        self.assertEqual(set(result["b"].keys()), set(SIDE_RESULT_KEYS))
+
+
+class ExplanationStatesSpecificDetailsTest(unittest.TestCase):
+
+    def test_none_or_empty_is_false(self):
+        self.assertFalse(_explanation_states_specific_details(None))
+        self.assertFalse(_explanation_states_specific_details(""))
+
+    def test_plain_prose_is_false(self):
+        self.assertFalse(
+            _explanation_states_specific_details(
+                "The post could not be found, so accessing its title failed."
+            )
+        )
+
+    def test_backtick_code_span_is_true(self):
+        self.assertTrue(
+            _explanation_states_specific_details("The fix belongs in `post_preview`.")
+        )
+
+    def test_function_call_is_true(self):
+        self.assertTrue(
+            _explanation_states_specific_details("Call get_object_or_404(Post, slug=slug) instead.")
+        )
+
+    def test_named_file_is_true(self):
+        self.assertTrue(
+            _explanation_states_specific_details("The bug is in blog/views.py near the top.")
+        )
+
+
+class CompareClaimsGuardTest(unittest.TestCase):
+
+    def _response_with_empty_claims(self, winner="A"):
+        payload = json.loads(VALID_RESPONSE)
+        payload["a"]["claims"] = []
+        payload["b"]["claims"] = []
+        payload["winner"] = winner
+        return json.dumps(payload)
+
+    def test_empty_claims_with_code_specific_explanation_is_a_judge_failure(self):
+        fixture = _make_fixture()
+        client = _client_returning(self._response_with_empty_claims())
+
+        result = compare(
+            client, "m", "tb", fixture, "src",
+            "Call `post_preview` with the right kwargs.", "on", rng=_FixedRng(0.1),
+        )
+
+        self.assertTrue(result["judge_failure"])
+        self.assertIn("empty claims list", result["error"])
+
+    def test_empty_claims_with_plain_explanation_is_not_a_failure(self):
+        fixture = _make_fixture()
+        client = _client_returning(self._response_with_empty_claims())
+
+        result = compare(
+            client, "m", "tb", fixture, "src",
+            "The post was missing, so the page couldn't be shown.",
+            "It also didn't work.",
+            rng=_FixedRng(0.1),
+        )
+
+        self.assertFalse(result["judge_failure"])
+
+    def test_non_empty_claims_with_code_specific_explanation_is_not_a_failure(self):
+        fixture = _make_fixture()
+        client = _client_returning(VALID_RESPONSE)  # both sides have claims
+
+        result = compare(
+            client, "m", "tb", fixture, "src",
+            "Call `post_preview` with the right kwargs.", "on", rng=_FixedRng(0.1),
+        )
+
+        self.assertFalse(result["judge_failure"])
