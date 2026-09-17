@@ -202,15 +202,6 @@ Fold each into whichever branch already touches the relevant file.
   before any refactor of `middleware.py` touches that name.
   Verify: not applicable. Closes only if `evals/run.py`'s exception-capture mechanism changes
   to something other than patching `sanitize_traceback`.
-- The eval harness's judge sees only the traceback and `expected_cause` /
-  `expected_fix_location`, never the retrieved chunks. A correct detail RAG-on read from
-  source but that isn't restated in those known facts currently reads as unverified to the
-  judge, indistinguishable from a genuinely invented one (see evals/README.md's Results
-  section, unexpected_kwarg). The judge should see the retrieved chunks so it can verify
-  specifics against them rather than treating everything outside the traceback as
-  unverified. Fold into the next harness change.
-  Verify: `build_judge_prompt` in `evals/judge.py` includes the retrieved chunks in the
-  prompt it builds.
 - Two frame classifiers now exist: `rag/retriever.py`'s `_is_project_path` (`BASE_DIR`-based)
   and `tracebacks.py`'s library-first heuristic (site-packages/dist-packages, the stdlib, and
   Django's own package directory; no `BASE_DIR` dependency). They can disagree on editable

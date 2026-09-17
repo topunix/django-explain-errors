@@ -23,9 +23,35 @@ from unittest.mock import patch
 EVALS_DIR = Path(__file__).resolve().parent
 REPO_ROOT = EVALS_DIR.parent
 FIXTURE_APP_DIR = EVALS_DIR / "fixture_app"
+BLOG_DIR = FIXTURE_APP_DIR / "blog"
 RESULTS_DIR = EVALS_DIR / "results"
 DB_PATH = FIXTURE_APP_DIR / "eval_fixture_app.sqlite3"
 INDEX_PATH = FIXTURE_APP_DIR / ".eval_rag_index.db"
+
+# Included in the judge's source section for every fixture (see
+# _build_judge_source), so the judge can check a claimed function name,
+# parameter, or file against the real thing instead of treating anything
+# outside the traceback and known facts as unverifiable.
+JUDGE_SOURCE_MODULES = (
+    ("blog/views.py", BLOG_DIR / "views.py"),
+    ("blog/models.py", BLOG_DIR / "models.py"),
+    ("blog/urls.py", BLOG_DIR / "urls.py"),
+)
+
+
+def _build_judge_source(fixture):
+    """(label, content) pairs for evals.judge.format_source_section: the
+    three modules above, present for every fixture, plus any templates this
+    fixture names via its `templates` field. Sending the same fixed modules
+    regardless of fixture or RAG side means their presence can't tip the
+    judge off to which explanation had RAG.
+    """
+    sources = [(label, path.read_text()) for label, path in JUDGE_SOURCE_MODULES]
+    for template_name in fixture.templates:
+        template_path = BLOG_DIR / "templates" / template_name
+        sources.append((template_name, template_path.read_text()))
+    return sources
+
 
 # USD per 1K tokens. Best-effort, current as of this writing -- update when
 # it drifts enough to matter, or drop a model's entry to skip its estimate.
@@ -236,7 +262,7 @@ def judge_all(fixtures, calls):
     """Pair up each fixture+run's RAG-off and RAG-on calls and judge them.
     Returns the list of judgment records.
     """
-    from evals.judge import compare, get_judge_client, get_judge_model
+    from evals.judge import compare, format_source_section, get_judge_client, get_judge_model
 
     client = get_judge_client()
     model = get_judge_model()
@@ -246,6 +272,7 @@ def judge_all(fixtures, calls):
 
     judgments = []
     for fixture in fixtures:
+        source_text = format_source_section(_build_judge_source(fixture))
         run_indices = sorted(
             {c["run_index"] for c in calls if c["fixture"] == fixture.name}
         )
@@ -257,6 +284,7 @@ def judge_all(fixtures, calls):
                 model,
                 off_call["traceback"] or "",
                 fixture,
+                source_text,
                 off_call["explanation"],
                 on_call["explanation"],
                 rng=rng,
