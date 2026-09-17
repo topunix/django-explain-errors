@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import traceback
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -9,6 +8,7 @@ from asgiref.sync import sync_to_async
 from .client import get_openai_client
 from .sanitize import sanitize_traceback
 from .throttle import SlidingWindowThrottle
+from .tracebacks import format_traceback
 from .rag.retriever import format_chunks_for_prompt, retrieve_chunks
 
 logger = logging.getLogger(__name__)
@@ -128,12 +128,11 @@ class ExplainErrorsMiddleware:
 
         explanation = None
         if self.throttle.allow():
-            # Get the exception traceback, trimmed to the most recent frames to
-            # cap token usage and stay within the model's context window.
-            tb = traceback.format_exc()
+            # Get the exception traceback, keeping application frames over
+            # library internals to cap token usage and stay within the
+            # model's context window.
             max_tb_chars = getattr(settings, "OPENAI_MAX_TRACEBACK_CHARS", 3000)
-            if len(tb) > max_tb_chars:
-                tb = "...(truncated)...\n" + tb[-max_tb_chars:]
+            tb = format_traceback(exception, max_tb_chars)
             # Sanitize the exact payload that ships, after truncation so we
             # don't waste work redacting frames that get discarded.
             tb = sanitize_traceback(tb)

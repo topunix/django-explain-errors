@@ -5,6 +5,7 @@ from django.http import JsonResponse, HttpResponse
 from django.test import SimpleTestCase, RequestFactory, AsyncRequestFactory, override_settings
 
 from explain_errors.middleware import DEFAULT_MAX_TOKENS, ExplainErrorsMiddleware
+from explain_errors.sanitize import sanitize_traceback as real_sanitize_traceback
 
 
 def _mock_openai():
@@ -159,6 +160,29 @@ class ExplainErrorsMiddlewareAsyncTest(SimpleTestCase):
         self.assertIsInstance(resp, JsonResponse)
         self.assertEqual(resp.status_code, 500)
         self.assertIn("error", json.loads(resp.content))
+
+    @override_settings(EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False)
+    async def test_async_traceback_captures_view_frame(self):
+        # process_exception runs inside sync_to_async's worker thread, where
+        # sys.exc_info() is empty even though the exception itself is caught
+        # in the async caller. Anything that built the traceback from
+        # sys.exc_info() instead of the exception object would silently send
+        # "NoneType: None" here.
+        async def boom(r):
+            raise ValueError("async boom")
+
+        mw = ExplainErrorsMiddleware(boom)
+        captured = {}
+
+        def spy_sanitize(tb):
+            result = real_sanitize_traceback(tb)
+            captured["tb"] = result
+            return result
+
+        with patch("explain_errors.middleware.sanitize_traceback", side_effect=spy_sanitize):
+            await mw(self.factory.get("/"))
+
+        self.assertIn("boom", captured["tb"])
 
     async def test_async_exception_reraises_by_default(self):
         async def boom(r):

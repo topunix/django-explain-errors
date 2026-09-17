@@ -211,6 +211,19 @@ Fold each into whichever branch already touches the relevant file.
   unverified. Fold into the next harness change.
   Verify: `build_judge_prompt` in `evals/judge.py` includes the retrieved chunks in the
   prompt it builds.
+- Two frame classifiers now exist: `rag/retriever.py`'s `_is_project_path` (`BASE_DIR`-based)
+  and `tracebacks.py`'s library-first heuristic (site-packages/dist-packages, the stdlib, and
+  Django's own package directory; no `BASE_DIR` dependency). They can disagree on editable
+  installs or a virtualenv living inside the project. Consolidate on one, probably the
+  `tracebacks.py` version since it doesn't depend on `BASE_DIR`. Fold into whichever branch
+  next touches either file.
+  Verify: only one frame-classification function exists across
+  `explain_errors/rag/retriever.py` and `explain_errors/tracebacks.py`.
+- `tests/test_eval_run.py::EvalHarnessEndToEndTest::test_mocked_run_writes_results_file_with_expected_shape`
+  fails rather than skips when `sqlite-vec` is not installed, unlike every other
+  sqlite-vec-dependent test in the suite. Fix it to skip the same way. Small, standalone;
+  do before the next release.
+  Verify: that test skips (not fails) in an environment without `sqlite-vec` installed.
 
 ## Open strategic questions
 - Provider abstraction beyond OpenAI-compatible endpoints. The Anthropic compatibility layer
