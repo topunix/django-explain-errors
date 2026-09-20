@@ -142,6 +142,24 @@ Fold each into whichever branch already touches the relevant file.
   Cheap to add, since the suite is fully mocked and has no network dependency.
   Verify: a CI workflow running `tests` against more than one Python/Django combination
   exists under `.github/workflows/` on `main`.
+- `publish.yml` and `test.yml` run the suite with different coverage, and neither is the
+  source of truth. `publish.yml`'s release-triggered job matrices Python 3.9 and 3.12 but
+  only installs plain `.` (no `[rag]` extra); `test.yml`'s push/PR job installs both `.` and
+  `.[rag]` but only runs on 3.12. A failure that only shows up on Python 3.9 -- the oldest
+  version this package claims to support -- would pass every PR, since `test.yml` never
+  touches 3.9, and only surface when a release is cut: the same shape of gap the sqlite-vec
+  and str_recursion loose ends closed for coverage, now open for the Python version axis.
+  Consolidate on one definition instead of keeping two workflow files in sync by hand,
+  probably by having `publish.yml` call `test.yml` via `workflow_call` (add a
+  `workflow_call` trigger to `test.yml`, replace `publish.yml`'s `test` job body with a
+  `uses: ./.github/workflows/test.yml` job) so there is exactly one place that defines what
+  "the suite passes" means, and both the release gate and every PR run the same thing. Once
+  consolidated, extending that shared workflow's Python/Django matrix (the previous loose
+  end) fixes both gaps in one place instead of two.
+  Verify: `publish.yml`'s `test` job has no step bodies of its own -- it invokes `test.yml`
+  (or another shared workflow) -- and that shared workflow's coverage (Python versions x
+  `[rag]`/no-`[rag]`) is exactly what both the `release` and `push`/`pull_request` triggers
+  exercise.
 - The `description` in `setup.py` and the GitHub repository description are intentionally
   identical, so they don't drift apart again. Change both together. `setup.py`'s copy is the
   PyPI summary line, frozen per version, so it can only change in a release commit.
