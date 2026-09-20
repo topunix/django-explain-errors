@@ -18,6 +18,7 @@ import statistics
 import subprocess
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import urlsplit
@@ -464,6 +465,21 @@ def tally_usage(calls):
     return result
 
 
+def tally_judge_usage(judgments):
+    """Sum judge prompt/completion tokens across every judge call, including
+    ones that ended in a judge_failure -- the API call still spent the
+    tokens even when the response didn't parse. Separate from
+    tally_usage(calls), which only covers the generator side.
+    """
+    have_usage = any(j.get("prompt_tokens") is not None for j in judgments)
+    if have_usage:
+        prompt_tokens = sum(j.get("prompt_tokens") or 0 for j in judgments)
+        completion_tokens = sum(j.get("completion_tokens") or 0 for j in judgments)
+    else:
+        prompt_tokens = completion_tokens = None
+    return {"prompt_tokens": prompt_tokens, "completion_tokens": completion_tokens}
+
+
 def estimate_cost_usd(model, prompt_tokens, completion_tokens):
     pricing = PRICING_PER_1K_TOKENS.get(model)
     if pricing is None or prompt_tokens is None or completion_tokens is None:
@@ -477,36 +493,58 @@ def print_summary(fixtures, calls, judgments, generator_model, judge_model):
     tallied = tally_judgments(judgments)
     latency = tally_latency(calls)
     usage = tally_usage(calls)
+    judge_usage = tally_judge_usage(judgments)
 
     print()
     print(f"generator: {generator_model}   judge: {judge_model}")
     print(f"fixtures: {len(fixtures)}   calls: {len(calls)}   judgments: {len(judgments)}")
-    if tallied["judge_failures"]:
-        print(f"judge failures (malformed response): {tallied['judge_failures']}")
+    judge_failures = tallied["judge_failures"]
+    if judge_failures:
+        print(f"judge failures (malformed response): {judge_failures}")
 
-    print()
-    print("Wins by group (this is the headline, not the aggregate):")
-    for group, label in (("A", "A -- RAG predicted to help"), ("B", "B -- RAG predicted neutral")):
-        w = tallied["wins_by_group"][group]
-        total = w["rag_on"] + w["rag_off"] + w["tie"]
-        print(
-            f"  Group {label}: RAG-on {w['rag_on']}, RAG-off {w['rag_off']}, "
-            f"tie {w['tie']}  (of {total})"
+    # A judge that failed on more than a third of its calls didn't produce a
+    # reliable sample -- printing win tallies from what's left reads as a
+    # finding when it's really a partial run. See evals/README.md.
+    failure_fraction = (judge_failures / len(judgments)) if judgments else 0.0
+    incomplete = failure_fraction > 1 / 3
+
+    if incomplete:
+        error_counts = Counter(
+            j["error"] for j in judgments if j.get("judge_failure") and j.get("error")
         )
+        most_common = error_counts.most_common(1)
+        most_common_error = most_common[0][0] if most_common else "(no error captured)"
+        print()
+        print(
+            f"RUN INCOMPLETE: {judge_failures}/{len(judgments)} judge calls failed "
+            "(more than a third) -- win tallies would represent a partial "
+            "sample, not a result. Not printing them."
+        )
+        print(f"Most common judge error: {most_common_error}")
+    else:
+        print()
+        print("Wins by group (this is the headline, not the aggregate):")
+        for group, label in (("A", "A -- RAG predicted to help"), ("B", "B -- RAG predicted neutral")):
+            w = tallied["wins_by_group"][group]
+            total = w["rag_on"] + w["rag_off"] + w["tie"]
+            print(
+                f"  Group {label}: RAG-on {w['rag_on']}, RAG-off {w['rag_off']}, "
+                f"tie {w['tie']}  (of {total})"
+            )
 
-    print()
-    print("Per-question yes counts by group:")
-    for group in ("A", "B"):
-        print(f"  Group {group}:")
-        q = tallied["question_yes_counts_by_group"][group]
-        for key in q["rag_on"]:
-            print(f"    {key:24} rag_on={q['rag_on'][key]:<4} rag_off={q['rag_off'][key]}")
+        print()
+        print("Per-question yes counts by group:")
+        for group in ("A", "B"):
+            print(f"  Group {group}:")
+            q = tallied["question_yes_counts_by_group"][group]
+            for key in q["rag_on"]:
+                print(f"    {key:24} rag_on={q['rag_on'][key]:<4} rag_off={q['rag_off'][key]}")
 
-    print()
-    print("Claims recorded per side (0 across the board means the judge never checked):")
-    for group in ("A", "B"):
-        c = tallied["claim_counts_by_group"][group]
-        print(f"  Group {group}: rag_on={c['rag_on']:<4} rag_off={c['rag_off']}")
+        print()
+        print("Claims recorded per side (0 across the board means the judge never checked):")
+        for group in ("A", "B"):
+            c = tallied["claim_counts_by_group"][group]
+            print(f"  Group {group}: rag_on={c['rag_on']:<4} rag_off={c['rag_off']}")
 
     print()
     print("Latency:")
@@ -522,24 +560,45 @@ def print_summary(fixtures, calls, judgments, generator_model, judge_model):
 
     print()
     print("Token usage:")
-    total_cost = 0.0
-    have_cost = False
+    print("  Generator:")
+    generator_cost_total = 0.0
+    have_generator_cost = False
     for label in ("rag_off", "rag_on"):
         u = usage[label]
         if u["prompt_tokens"] is None:
-            print(f"  {label}: not captured")
+            print(f"    {label}: not captured")
             continue
         cost = estimate_cost_usd(generator_model, u["prompt_tokens"], u["completion_tokens"])
         cost_str = f"(~${cost:.4f})" if cost is not None else "(no pricing entry for this model)"
         print(
-            f"  {label}: prompt={u['prompt_tokens']} completion={u['completion_tokens']} "
+            f"    {label}: prompt={u['prompt_tokens']} completion={u['completion_tokens']} "
             f"{cost_str}"
         )
         if cost is not None:
-            total_cost += cost
-            have_cost = True
-    if have_cost:
-        print(f"  estimated total: ~${total_cost:.4f}")
+            generator_cost_total += cost
+            have_generator_cost = True
+    if have_generator_cost:
+        print(f"    generator cost: ~${generator_cost_total:.4f}")
+
+    print("  Judge:")
+    judge_cost = None
+    if judge_usage["prompt_tokens"] is None:
+        print("    not captured")
+    else:
+        judge_cost = estimate_cost_usd(
+            judge_model, judge_usage["prompt_tokens"], judge_usage["completion_tokens"]
+        )
+        cost_str = f"(~${judge_cost:.4f})" if judge_cost is not None else "(no pricing entry for this model)"
+        print(
+            f"    prompt={judge_usage['prompt_tokens']} completion={judge_usage['completion_tokens']} "
+            f"{cost_str}"
+        )
+        if judge_cost is not None:
+            print(f"    judge cost: ~${judge_cost:.4f}")
+
+    if have_generator_cost or judge_cost is not None:
+        combined = generator_cost_total + (judge_cost or 0.0)
+        print(f"  estimated total (generator + judge): ~${combined:.4f}")
 
 
 def main(argv=None):

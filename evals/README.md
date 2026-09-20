@@ -23,13 +23,18 @@ Every run makes:
   RAG-off and RAG-on), using `OPENAI_MODEL` (default `gpt-4o-mini`).
 - 15 judge chat completions per `--runs` value of 1, using `EVAL_JUDGE_MODEL`.
 
-At `gpt-4o-mini` pricing, one `--runs 1` pass costs on the order of a few
-cents; the judge and embedding calls are usually cheaper than the generator
-calls unless you point `EVAL_JUDGE_MODEL` at something expensive. The
-harness prints its own token-usage-based cost estimate at the end of every
-run (generator side only) so you don't have to guess -- read it before
-running `--runs` any higher than 1. **`--runs 20` is real money, not a
-typo-proof default; there isn't one.**
+At `gpt-4o-mini` pricing, the generator side alone costs on the order of a
+few cents per `--runs 1` pass. The judge side is not cheaper -- it sends
+source excerpts plus both explanations on every comparison, and is the
+larger share of the real cost, not a rounding error on top of the
+generator. Measured against a live OpenRouter judge model, five `--runs 1`
+passes consumed roughly $4.55 of credit combined: call it about eighty
+cents a pass, not the two cents an earlier version of this estimate
+implied by only counting generator tokens. The harness prints separate
+generator and judge token-usage and cost lines at the end of every run so
+you don't have to guess at either -- read both before running `--runs` any
+higher than 1. **`--runs 20` is real money, not a typo-proof default;
+there isn't one.**
 
 ## Environment variables
 
@@ -127,13 +132,26 @@ Below the win counts:
   every real 500 already waits on. It's also load-bearing for the
   `debug page injection` roadmap item's decision rule
   (see `docs/roadmap.md`).
-- **Token usage and estimated cost**: only reported when the generator
-  emitted a usage log line the harness could capture (it always does,
-  against the real OpenAI API; a local OpenAI-compatible server via
-  `OPENAI_BASE_URL` may not return `usage`, in which case this prints
-  "not captured"). The cost estimate uses a small hardcoded price table in
-  `evals/run.py` (`PRICING_PER_1K_TOKENS`) that will drift out of date --
-  treat it as a rough order of magnitude, not a bill.
+- **Token usage and estimated cost**, printed as separate Generator and
+  Judge lines (plus a combined total) so the split between them is
+  visible -- the judge is usually the larger of the two, see "What it
+  costs" above. Each side is only reported when the corresponding API
+  response carried usage data (it always does against the real OpenAI and
+  OpenRouter APIs; a local OpenAI-compatible server via `OPENAI_BASE_URL`
+  or `EVAL_JUDGE_BASE_URL` may not return `usage`, in which case that line
+  prints "not captured"). The cost estimate uses a small hardcoded price
+  table in `evals/run.py` (`PRICING_PER_1K_TOKENS`) that will drift out of
+  date -- treat it as a rough order of magnitude, not a bill. A model
+  (generator or judge) with no entry in that table prints its token counts
+  with "no pricing entry for this model" instead of a dollar figure.
+
+A run where more than a third of judge comparisons failed to parse doesn't
+print win tallies, per-question yes counts, or claim counts at all -- those
+numbers on a mostly-failed sample look like a finding when they're really
+noise. Instead the summary prints the failure count, the most common judge
+error, and a line stating the run is incomplete. Latency and token usage
+still print either way, since those reflect calls actually made, not
+judgments actually reached.
 
 A judge response that doesn't parse (see `evals/judge.py:parse_judge_response`)
 is recorded as a judge failure, counted separately, and excluded from the
@@ -196,8 +214,10 @@ judge limitation noted below.
 
 Latency: p50 ~2s on both sides (rag-off 1.82s, rag-on 2.11s across all 90
 calls) -- RAG adds no meaningful overhead on top of the generator call
-itself. Cost: about $0.02 in generator tokens for a full `--runs 3` pass
-(54k prompt + 19k completion tokens at `gpt-4o-mini` pricing).
+itself. Cost: about $0.02 in generator tokens alone for a full `--runs 3`
+pass (54k prompt + 19k completion tokens at `gpt-4o-mini` pricing) --
+judge tokens are not included in that figure; see "What it costs" above
+for the real combined number.
 
 The plain finding: without access to the project's source, `gpt-4o-mini`
 tends to invent plausible-sounding function names, parameters, and fix
@@ -219,6 +239,30 @@ currently tell "true but not in the known facts" apart from "fabricated."
 That's a harness limitation, not a generator finding; see the roadmap item
 to give the judge the retrieved chunks.
 
+## Spot-checking claim statuses
+
+`evals/spotcheck.py` is not a verifier -- claims are English, and nothing
+short of a human reading them settles whether one is right. What it does
+is cheap and mechanical: it pulls every identifier, dotted filename, and
+function-call-shaped token out of each claim's text and checks whether
+that token literally appears in `evals/fixture_app/blog/`'s source. A
+claim the judge marked "contradicted" that nonetheless names something
+real in the source is exactly the failure mode worth a second look --
+either the judge is wrong, or it's right for a reason the naive token
+match can't see. Run it against the latest results file with
+`python evals/spotcheck.py`.
+
+On the run of 2026-09-17, it flagged 14 of 363 claims, and all 14 were
+correct judgments on manual inspection -- the judge's "contradicted" calls
+held up, the spot-check just surfaced them for a human to confirm rather
+than proving them wrong. Two examples worth naming: RAG-off asserted
+`def post_preview(request):` when the real signature at `views.py:40` is
+`def post_preview(request, post_id)`, and RAG-off said
+`post_timeago.html` needs `{% load humanize %}` added when line 1 already
+has it. Zero for zero on false positives in this run isn't a guarantee for
+the next one -- it's a script that flags candidates, not a correctness
+proof.
+
 ## Files
 
 - `fixture_app/` -- a small, deliberately breakable Django blog. A
@@ -230,4 +274,5 @@ to give the judge the retrieved chunks.
 - `run.py` -- the harness entry point described above.
 - `judge.py` -- the judge prompt (`JUDGE_PROMPT_TEMPLATE`, easy to edit)
   and client.
+- `spotcheck.py` -- see "Spot-checking claim statuses" above.
 - `results/` -- git-ignored. One JSON file per run.

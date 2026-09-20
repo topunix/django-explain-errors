@@ -319,11 +319,19 @@ def compare(
 
     prompt = build_judge_prompt(traceback_text, fixture, source_text, explanation_a, explanation_b)
 
+    # Captured as soon as the API call itself succeeds, so a parse failure
+    # afterward still leaves the tokens that call actually spent on the
+    # judge failure record below -- the judge model was paid for either way.
+    prompt_tokens = completion_tokens = None
     try:
         response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": prompt}],
         )
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            prompt_tokens = usage.prompt_tokens
+            completion_tokens = usage.completion_tokens
         raw_text = response.choices[0].message.content
         parsed = parse_judge_response(raw_text)
 
@@ -350,6 +358,8 @@ def compare(
             "a": None,
             "b": None,
             "reasoning": None,
+            "prompt_tokens": prompt_tokens,
+            "completion_tokens": completion_tokens,
         }
 
     winner = parsed["winner"]
@@ -364,4 +374,6 @@ def compare(
         "a": _side_result(parsed["a"]),
         "b": _side_result(parsed["b"]),
         "reasoning": parsed["reasoning"],
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
     }

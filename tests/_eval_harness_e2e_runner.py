@@ -47,7 +47,8 @@ def _fake_generator_client(**kwargs):
 def _fake_judge_client():
     client = MagicMock()
     client.chat.completions.create.return_value = MagicMock(
-        choices=[MagicMock(message=MagicMock(content=JUDGE_RESPONSE_TEXT))]
+        choices=[MagicMock(message=MagicMock(content=JUDGE_RESPONSE_TEXT))],
+        usage=MagicMock(prompt_tokens=200, completion_tokens=80),
     )
     return client
 
