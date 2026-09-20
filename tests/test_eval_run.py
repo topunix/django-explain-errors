@@ -14,6 +14,16 @@ from evals.run import estimate_cost_usd, tally_judgments, tally_latency, tally_u
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+try:
+    import sqlite_vec  # noqa: F401
+    HAS_SQLITE_VEC = True
+except ImportError:
+    HAS_SQLITE_VEC = False
+
+requires_sqlite_vec = unittest.skipUnless(
+    HAS_SQLITE_VEC, "sqlite-vec not installed (rag extra)"
+)
+
 
 def _judgment(group, winner_side, rag_on_is_a=True, judge_failure=False, a=None, b=None):
     return {
@@ -286,6 +296,7 @@ class EvalHarnessEndToEndTest(unittest.TestCase):
     tests/_eval_harness_e2e_runner.py's docstring.
     """
 
+    @requires_sqlite_vec
     def test_mocked_run_writes_results_file_with_expected_shape(self):
         results_dir = os.path.join(REPO_ROOT, "evals", "results")
         os.makedirs(results_dir, exist_ok=True)
