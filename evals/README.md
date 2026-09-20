@@ -24,17 +24,28 @@ Every run makes:
 - 15 judge chat completions per `--runs` value of 1, using `EVAL_JUDGE_MODEL`.
 
 At `gpt-4o-mini` pricing, the generator side alone costs on the order of a
-few cents per `--runs 1` pass. The judge side is not cheaper -- it sends
-source excerpts plus both explanations on every comparison, and is the
-larger share of the real cost, not a rounding error on top of the
-generator. Measured against a live OpenRouter judge model, five `--runs 1`
-passes consumed roughly $4.55 of credit combined: call it about eighty
-cents a pass, not the two cents an earlier version of this estimate
-implied by only counting generator tokens. The harness prints separate
-generator and judge token-usage and cost lines at the end of every run so
-you don't have to guess at either -- read both before running `--runs` any
-higher than 1. **`--runs 20` is real money, not a typo-proof default;
-there isn't one.**
+few cents -- about $0.02 for a full `--runs 3` pass. The judge side is not
+cheaper; it is the real cost. A `--runs 3` pass measured against a live
+OpenRouter judge (`anthropic/claude-sonnet-5`) recorded 107,805 judge
+prompt tokens and 114,120 judge completion tokens, and OpenRouter billed
+$1.36 for it. Combined with the ~$0.02 of generator tokens for that same
+pass, **one `--runs 3` pass costs about $1.37 total** -- roughly two cents
+generator, roughly $1.35 judge -- not the two cents an earlier version of
+this estimate implied by counting generator tokens alone.
+
+Notice the judge's completion tokens (114k) outweigh its own prompt tokens
+(108k), even though the judge receives far more input per call (source
+excerpts plus two full explanations) than it produces. The reason is what
+it's asked to produce: a claim list per explanation, not a short verdict,
+and output tokens are priced several times higher than input ($10.00 vs
+$2.00 per 1M tokens for the OpenRouter judge model measured here). That
+completion-token volume, not the larger prompt side, is what actually
+drives the bill -- and it scales with `--runs` the same way the win counts
+do. The harness prints separate generator and judge token-usage and cost
+lines at the end of every run so you don't have to guess at either --
+anyone considering `--runs` above 3 should read the $1.37 figure above
+first. **`--runs 20` is real money, not a typo-proof default; there isn't
+one.**
 
 ## Environment variables
 
