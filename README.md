@@ -213,6 +213,13 @@ read them in another language instead:
 EXPLAIN_ERRORS_LANGUAGE = "Spanish"  # or the code form, "es"
 ```
 
+There is no fixed list of supported languages. `EXPLAIN_ERRORS_LANGUAGE` accepts
+any language the configured model can write, because the setting adds one clause
+to the system prompt (see `LANGUAGE_CLAUSE_TEMPLATE` in
+`explain_errors/middleware.py`), not a translation catalog with its own
+maintained language list. How well it works varies by model; see the known
+limitation below.
+
 This is independent of Django's own `LANGUAGE_CODE`, which controls the language your
 site serves to its users, not the language you read explanations in. Regardless of
 `EXPLAIN_ERRORS_LANGUAGE`, exception type names, Django and Python identifiers, code,
@@ -227,13 +234,18 @@ generally solid against OpenAI and Anthropic's APIs, but a small local model tha
 writes fluent English explanations may produce broken or mixed-language output once
 asked to switch languages.
 
-When a language is configured, the token ceiling (`OPENAI_MAX_TOKENS`) is scaled up
-automatically so explanations in languages that tokenize less efficiently than English
-aren't cut off mid-sentence. This scaling is deliberately generous — billing follows
-tokens actually generated, so unused headroom costs nothing — rather than precise: the
-underlying tokens-per-word figures are estimates, not direct measurements, and the
-default model (`gpt-4o-mini`) uses the `o200k_base` tokenizer, which handles non-Latin
-scripts considerably better than the `cl100k_base`-era ratios these estimates lean on.
+When a language is configured and `OPENAI_MAX_TOKENS` isn't set explicitly, the
+token ceiling defaults to 3,000 instead of 1,000, a flat 3x multiplier applied the
+same way regardless of how well or poorly a given language is known to tokenize, so
+explanations in languages that use more tokens per word than English aren't cut off
+mid-sentence. This is a ceiling, not a target: billing follows tokens actually
+generated, so the extra headroom costs nothing if unused. Setting `OPENAI_MAX_TOKENS`
+explicitly always overrides this scaling, at any value, including one lower than the
+unscaled 1,000 default. The multiplier itself is deliberately generous rather than
+precise: the underlying tokens-per-word figures are estimates, not direct
+measurements, and the default model (`gpt-4o-mini`) uses the `o200k_base` tokenizer,
+which handles non-Latin scripts considerably better than the `cl100k_base`-era ratios
+these estimates lean on.
 
 ## Codebase-aware explanations (RAG)
 
@@ -389,15 +401,15 @@ django.db.utils.IntegrityError: NOT NULL constraint failed: blog_post.author_id
 
 To check whether RAG-grounded explanations are actually better, not just
 longer, the package ships an eval harness (`evals/`): fifteen deliberately
-broken Django views, each explained twice — once from the traceback alone,
-once with RAG enabled — and judged by a separate model, blind to which
+broken Django views, each explained twice (once from the traceback alone,
+once with RAG enabled) and judged by a separate model, blind to which
 explanation is which, against the error's known cause and correct fix
 location. Which side the judge sees as "A" is randomized per comparison so
 position can't bias the result.
 
 Across three runs (45 judged comparisons, 2 judge failures, 43 scored),
 RAG-on won 35, RAG-off 5, and 3 tied. The gap isn't spread evenly across
-everything the judge checks — it's concentrated in whether the explanation
+everything the judge checks. It's concentrated in whether the explanation
 names the right file and function, and whether it invents details along
 the way: on `points_to_fix_location`, RAG-on answered yes in 26 of the
 group-A comparisons against RAG-off's 13; on `no_fabrication`, 26 against
@@ -418,27 +430,6 @@ inspection, is a sample that turned up no false positive, not a proof
 that none exists. Full per-fixture results, the judge prompt, and how to
 reproduce this (about $1.37 for a `--runs 3` pass, most of it judge cost)
 are in [`evals/README.md`](evals/README.md).
-
-## Example
-
-Here is an example of how to use the middleware in a Django project:
-
-```python
-# settings.py
-
-DEBUG = True
-
-MIDDLEWARE = [
-    ...
-    'explain_errors.middleware.ExplainErrorsMiddleware',
-]
-
-# .env
-
-OPENAI_API_KEY=your_openai_api_key_here
-```
-
-When an error occurs, you will see an explanation printed to stdout.
 
 ## License
 
