@@ -245,6 +245,32 @@ a wrong chunk ranking high introduces its own kind of error. Whether that
 recurs across more fixtures is exactly what the roadmap's "Retrieval
 anchoring" item would test (see `docs/roadmap.md`).
 
+**A source-extraction bug affecting `str_recursion`, now fixed.**
+`_extract_function_source` used to pick a function's source by name alone
+-- the first `def <name>` it found walking the module, full stop. For
+`str_recursion`, whose `RecursionError` alternates between
+`Comment.__str__` and `Comment.summary` on every frame, which one lands
+as the innermost project frame depends on how deep the call stack already
+was when the recursion started (Django's own dispatch and template
+rendering depth), not on anything about the fixture itself. Whenever it
+resolved to `__str__`, the name-only lookup returned `Author.__str__` --
+the first `__str__` in `models.py`, textually, and an unrelated one-line
+method -- instead of `Comment.__str__`, which is where the actual
+recursion lives. `_extract_function_source` now also takes the frame's
+line number and matches the definition whose body contains it, so it
+returns the method that actually ran regardless of which side of the
+recursion the traceback happened to end on. Any past run where this fired
+would have shown the judge a materially smaller, wrong-class excerpt for
+`str_recursion` -- one line instead of the four-line property plus
+`__str__` that actually recurse -- on both RAG-on and RAG-off sides
+alike (this path is shared, not RAG-specific), on whatever fraction of
+comparisons hit the unlucky parity. The **Results** numbers above predate
+this fix and were not re-run to quantify the effect; treat any
+`str_recursion`-specific finding in them with that in mind. The fix
+applies to every fixture, not just this one -- any two classes in
+`blog/models.py` or `blog/views.py` that happen to share a method name
+were equally exposed.
+
 ## Spot-checking claim statuses
 
 `evals/spotcheck.py` is not a verifier -- claims are English, and nothing

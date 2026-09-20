@@ -199,11 +199,6 @@ Fold each into whichever branch already touches the relevant file.
   next touches either file.
   Verify: only one frame-classification function exists across
   `explain_errors/rag/retriever.py` and `explain_errors/tracebacks.py`.
-- `tests/test_eval_run.py::EvalHarnessEndToEndTest::test_mocked_run_writes_results_file_with_expected_shape`
-  fails rather than skips when `sqlite-vec` is not installed, unlike every other
-  sqlite-vec-dependent test in the suite. Fix it to skip the same way. Small, standalone;
-  do before the next release.
-  Verify: that test skips (not fails) in an environment without `sqlite-vec` installed.
 - Before the app-frame-preserving truncation change, `process_exception`'s tail-slice built the
   traceback from `traceback.format_exc()`, which reads `sys.exc_info()` for the current thread. On
   the async path that call runs inside `sync_to_async`'s worker thread, and under a real ASGI

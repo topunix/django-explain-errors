@@ -32,13 +32,25 @@ DB_PATH = FIXTURE_APP_DIR / "eval_fixture_app.sqlite3"
 INDEX_PATH = FIXTURE_APP_DIR / ".eval_rag_index.db"
 
 
-def _extract_function_source(file_text, function_name):
-    """Return the exact source text of the first function or method named
-    `function_name` in `file_text`, or None if it isn't there.
+def _extract_function_source(file_text, function_name, lineno):
+    """Return the exact source text of the function or method named
+    `function_name` whose body contains `lineno`, or None if there is no
+    such function.
+
+    Matching by name alone picks whichever same-named definition appears
+    first in the file -- wrong whenever more than one class defines a
+    method of that name (every model's own `__str__`, for instance).
+    `lineno` (the frame's line, or the view's `co_firstlineno` when there
+    is no frame) disambiguates by pointing at the actual definition that
+    ran.
     """
     tree = ast.parse(file_text)
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == function_name:
+        if (
+            isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == function_name
+            and node.lineno <= lineno <= (node.end_lineno or node.lineno)
+        ):
             return ast.get_source_segment(file_text, node)
     return None
 
@@ -92,11 +104,15 @@ def _build_judge_source(fixture, exception):
     if frame is not None:
         function_file = Path(frame.filename)
         function_name = frame.name
+        function_lineno = frame.lineno
     else:
         function_file = Path(match.func.__code__.co_filename)
         function_name = view_name
+        function_lineno = match.func.__code__.co_firstlineno
 
-    function_source = _extract_function_source(function_file.read_text(), function_name)
+    function_source = _extract_function_source(
+        function_file.read_text(), function_name, function_lineno
+    )
     if function_source is None:
         raise RuntimeError(
             f"fixture {fixture.name!r}: could not find function {function_name!r} "
