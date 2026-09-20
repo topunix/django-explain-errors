@@ -126,6 +126,14 @@ def _build_judge_source(fixture, exception):
 PRICING_PER_1K_TOKENS = {
     "gpt-4o-mini": {"prompt": 0.00015, "completion": 0.0006},
     "gpt-4o": {"prompt": 0.0025, "completion": 0.01},
+    # OpenRouter slug for the judge model this harness has actually been run
+    # against; OpenRouter passes Anthropic's first-party rates through
+    # unchanged ($2.00 / $10.00 per 1M tokens). Calibrated against a real
+    # bill: the 2026-09-20 run recorded 107,805 judge prompt tokens and
+    # 114,120 judge completion tokens for one `--runs 3` pass, and
+    # OpenRouter billed $1.36 for that day -- this entry reproduces $1.36
+    # from those counts.
+    "anthropic/claude-sonnet-5": {"prompt": 0.002, "completion": 0.01},
 }
 
 
