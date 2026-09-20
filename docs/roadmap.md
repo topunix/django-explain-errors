@@ -125,10 +125,12 @@ Sequencing below follows from that.
 ## Loose ends (not tasks)
 Fold each into whichever branch already touches the relevant file.
 
-- No CI test matrix. `setup.py` declares `Django>=4.2` and `python_requires>=3.9`, but the
-  suite is only run against one Python/Django combination. Django 6.1 requires Python 3.12,
-  so the matrix has to model Python and Django together, not either alone, or it will
-  silently skip the combinations that actually matter.
+- No Python/Django version matrix in CI. `.github/workflows/test.yml` now runs the suite on
+  every push and pull request (with and without the `[rag]` extra), but always against a
+  single Python/Django combination. `setup.py` declares `Django>=4.2` and
+  `python_requires>=3.9`, and nothing runs the suite against more than one pairing. Django
+  6.1 requires Python 3.12, so the matrix has to model Python and Django together, not
+  either alone, or it will silently skip the combinations that actually matter.
   The per-version `Framework :: Django :: X.Y` classifiers (4.2 through 6.1) were removed for
   the same reason: none were backed by a suite run. 5.0/5.1/5.2 were never executed, 6.0/6.1
   weren't installable in the sandbox that added them, and 4.2/6.1 were only touched by the
