@@ -395,26 +395,29 @@ explanation is which, against the error's known cause and correct fix
 location. Which side the judge sees as "A" is randomized per comparison so
 position can't bias the result.
 
-Across three runs (45 judged comparisons), RAG-on won 39, including ten of
-the fifteen fixtures three-for-three. The gap isn't spread evenly across
+Across three runs (45 judged comparisons, 2 judge failures, 43 scored),
+RAG-on won 35, RAG-off 5, and 3 tied. The gap isn't spread evenly across
 everything the judge checks — it's concentrated in whether the explanation
-names the right file and function. Without source access, `gpt-4o-mini`
-tends to invent a plausible-sounding function name or parameter rather than
-say it doesn't know; given the actual code via RAG, it mostly does not.
+names the right file and function, and whether it invents details along
+the way: on `points_to_fix_location`, RAG-on answered yes in 26 of the
+group-A comparisons against RAG-off's 13; on `no_fabrication`, 26 against
+17. Without source access, `gpt-4o-mini` tends to invent a
+plausible-sounding function name or parameter rather than say it doesn't
+know; given the actual code via RAG, it mostly does not.
 
 Three limitations are worth knowing before trusting this uncritically: RAG
 can anchor on the wrong retrieved chunk, as it did in one fixture
 (`missing_post_key`) where the fix got redirected to a retrieved template
-instead of the view; the judge itself sees only the traceback and the
-known facts, not the retrieved source, so a detail RAG-on read correctly
-from code can look just as unverified to the judge as one it invented; and
-the traceback is trimmed to its last `OPENAI_MAX_TRACEBACK_CHARS`, which
-for a deep ORM stack can drop the application frames entirely, as the
-`missing_fk` example above shows -- part of RAG-off's disadvantage there
-may be that it never saw the frame naming the function, not only that it
-lacked the source. Untested. Full per-fixture results, the judge prompt,
-and how to reproduce this (about two cents a pass) are in
-[`evals/README.md`](evals/README.md).
+instead of the view; the judge is shown the failing function's own
+source, which is the same source RAG-on's retriever draws from, so part
+of RAG-on's `no_fabrication` advantage may be judge and generator
+overlapping on material RAG-off never sees rather than RAG-on being more
+careful; and claim statuses are spot-checked, not exhaustively audited --
+a script that flagged 14 of 363 claims on one run, all correct on manual
+inspection, is a sample that turned up no false positive, not a proof
+that none exists. Full per-fixture results, the judge prompt, and how to
+reproduce this (about $1.37 for a `--runs 3` pass, most of it judge cost)
+are in [`evals/README.md`](evals/README.md).
 
 ## Example
 

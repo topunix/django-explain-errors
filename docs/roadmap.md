@@ -25,18 +25,7 @@ Sequencing below follows from that.
 
 ## Sequenced queue
 
-1. **app-frame-preserving truncation**: `OPENAI_MAX_TRACEBACK_CHARS` keeps the last N
-   characters, which for Django ORM stacks drops the application frames and keeps the
-   library internals. Every explanation with RAG off, the default, is affected. Trim
-   library frames first and keep frames from the project's own source, the way Django's
-   debug page distinguishes them. Then rerun the eval harness RAG-off to see how much of
-   the gap this closes on its own. First in queue because it is a shipped defect, it is
-   one session with no dependencies, and its result changes how the eval finding should
-   be stated.
-   Verify: sanitize or middleware code distinguishes application frames from library
-   frames when trimming.
-
-2. **django-docs-links**: cross-reference explanations to official Django documentation.
+1. **django-docs-links**: cross-reference explanations to official Django documentation.
    Ship the cheap version first: a static map of exception type plus context to a docs
    anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
    generated prose is not, which matters most for the learning audience and shrinks the
@@ -50,13 +39,13 @@ Sequencing below follows from that.
      404 or silently fall back.
    Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
 
-3. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
+2. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
    backed by shipped behavior. Not before. The README documents shipped behavior; anything
    earlier is a promise that has to be kept.
    Verify: the README lead paragraph describes a grounded Django learning aid rather than an
    error explainer.
 
-4. **Debug page injection**: append the explanation into the debug page HTML rather than only
+3. **Debug page injection**: append the explanation into the debug page HTML rather than only
    stdout. The latency question is settled: eval harness measurements (`evals/README.md`'s
    Results section) put generator p50 at 1.8 to 2.1s, squarely inside the "build the blocking
    version" range the decision rule called for. Build the blocking version.

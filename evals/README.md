@@ -171,84 +171,79 @@ never counted as a tie.
 
 ## Results
 
-First real evidence from this harness: 3 runs against `gpt-4o-mini`
-(`evals/results/20260916T235351Z.json`, git SHA
-`843da72b74778644c9c1596184e590798b14f8f4`; see also the earlier 1-run
-pass, `evals/results/20260916T233441Z.json`, same SHA).
+Final numbers, from the 2026-09-20 run (`evals/results/20260920T204005Z.json`):
+3 runs across all 15 fixtures, 45 comparisons, 2 judge failures, 43 scored.
 
-**RAG-on won 39 of 45 judged comparisons** (4 rag-off, 2 tie):
+**RAG-on won 35 of 43 scored comparisons** (5 rag-off, 3 tie).
 
-| Group | RAG-on | RAG-off | Tie |
+`identifies_cause` and `written_for_learner` aren't shown below -- both
+sides answer those correctly almost every time, so they don't
+discriminate. `points_to_fix_location`, `no_fabrication`, and
+`fix_would_work` do:
+
+| Question | Group | RAG-on yes | RAG-off yes |
 |---|---|---|---|
-| A (10 fixtures x 3 runs) | 25 | 3 | 2 |
-| B (5 fixtures x 3 runs) | 14 | 1 | 0 |
+| `points_to_fix_location` | A | 26 | 13 |
+| `points_to_fix_location` | B | 11 | 7 |
+| `no_fabrication` | A | 26 | 17 |
+| `no_fabrication` | B | 14 | 5 |
+| `fix_would_work` | A | 28 | 22 |
+| `fix_would_work` | B | 14 | 12 |
 
-`points_to_fix_location` is the discriminator, not `identifies_cause` or
-`written_for_learner` (both sides answer those correctly almost every
-time). RAG-on names the actual file and function; RAG-off, with only the
-traceback, usually can't:
+Claims checked per side: 109 (RAG-on) vs 104 (RAG-off) in group A, 56 vs
+57 in group B -- both sides state plenty of checkable specifics; the
+judge isn't defaulting to an empty claims list on either side.
 
-| Group | RAG-on says yes | RAG-off says yes |
-|---|---|---|
-| A | 21 / 30 | 6 / 30 |
-| B | 12 / 15 | 8 / 15 |
+Latency: p50 2.12s RAG-off, 2.22s RAG-on -- RAG adds no meaningful
+overhead on top of the generator call itself.
 
-Per-fixture win counts across the 3 runs:
+**The truncation caveat, resolved.** Earlier versions of this section
+carried an unresolved caveat, twice, instead of settling it: before the
+`app-frame-preserving truncation` fix, `OPENAI_MAX_TRACEBACK_CHARS` kept
+only the tail of the raw traceback, which for a Django ORM stack
+routinely dropped the application frames and left only library
+internals. Part of RAG-off's `points_to_fix_location` disadvantage was
+never about missing source access -- RAG-off was never shown the frame
+naming the failing function at all. After the fix, RAG-off's
+`points_to_fix_location` in group A rose from 6 of 30 to the 13 above,
+while RAG-on held roughly steady, around 21 to 26. Roughly half of the
+old location gap was the trim bug; the rest is real.
 
-| Fixture | Group | RAG-on | RAG-off | Tie |
-|---|---|---|---|---|
-| none_attribute | A | 3 | 0 | 0 |
-| str_recursion | A | 3 | 0 | 0 |
-| bad_lookup | A | 2 | 0 | 1 |
-| missing_profile | A | 3 | 0 | 0 |
-| non_unique_get | A | 3 | 0 | 0 |
-| unexpected_kwarg | A | 1 | 1 | 1 |
-| unvalidated_int | A | 2 | 1 | 0 |
-| missing_fk | A | 3 | 0 | 0 |
-| missing_post_key | A | 2 | 1 | 0 |
-| get_not_404 | A | 3 | 0 | 0 |
-| template_typo | B | 2 | 1 | 0 |
-| url_name_typo | B | 3 | 0 | 0 |
-| missing_tag_library | B | 3 | 0 | 0 |
-| import_typo | B | 3 | 0 | 0 |
-| unclosed_tag | B | 3 | 0 | 0 |
+**The no_fabrication arc.** `no_fabrication` wasn't part of the judge
+prompt from the start. It was added because the judge kept deciding
+fabrication implicitly -- by default, whenever the other four questions
+tied -- which measured nothing. It then failed twice before it worked: a
+judge given only the traceback and the known-good facts defaulted to
+calling any specific-but-unfamiliar detail invented, since it had nothing
+to check it against; a judge later given whole source modules ignored
+them anyway, because answering "unverified" is cheaper than reading 300
+mostly-irrelevant lines. Neither version was actually measuring
+fabrication. Only forcing a per-claim verdict -- verified / contradicted /
+absent, checked against a small, relevant source excerpt, with
+`no_fabrication` *derived* from those verdicts in the parser rather than
+asked as a direct yes/no -- made the question measure what its name
+claimed. The numbers inverted once that landed: RAG-on went from
+*appearing* to fabricate more, an artifact of the judge having nothing to
+check its source-grounded details against, to measurably fabricating
+less, as the table above shows.
 
-`unexpected_kwarg` is the only fixture RAG-on didn't win outright -- one
-win, one loss, one tie, not a consistent loss. The loss is instructive for
-a different reason than it first looks: RAG-on's answer named `post_id`,
-which is in fact the correct kwarg for the failing route (confirmed
-against `evals/fixture_app/blog/urls.py` and `blog/views.py`), but the
-judge only sees the traceback and the known-good facts, neither of which
-mentions `post_id` -- so a correct detail RAG-on read from the source
-looked, to the judge, indistinguishable from an invented one. See the
-judge limitation noted below.
+**Two limitations remain.** The judge is shown the failing function's own
+source (`_build_judge_source` in `evals/run.py`) -- the same source
+RAG-on's retriever draws from -- so part of RAG-on's `no_fabrication`
+advantage is judge and generator overlapping on material RAG-off never
+sees, not necessarily RAG-on being more careful. And claim statuses are
+spot-checked, not exhaustively audited: `evals/spotcheck.py` (see below)
+flagged 14 of 363 claims on the 2026-09-17 run and all 14 held up on
+manual inspection -- a sample that didn't turn up a false positive, not a
+proof that none exists.
 
-Latency: p50 ~2s on both sides (rag-off 1.82s, rag-on 2.11s across all 90
-calls) -- RAG adds no meaningful overhead on top of the generator call
-itself. Cost: about $0.02 in generator tokens alone for a full `--runs 3`
-pass (54k prompt + 19k completion tokens at `gpt-4o-mini` pricing) --
-judge tokens are not included in that figure; see "What it costs" above
-for the real combined number.
-
-The plain finding: without access to the project's source, `gpt-4o-mini`
-tends to invent plausible-sounding function names, parameters, and fix
-steps rather than say it doesn't know. With source access via RAG, it
-mostly does not -- in both groups, not just the one RAG was built for.
-
-`missing_post_key` shows RAG-on anchoring on an adjacent retrieved chunk
-instead of the one that actually matters: the judge's reasoning states
-directly that it redirected the fix to a retrieved template instead of the
-view. Retrieval reduces fabrication; it does not eliminate it, and it can
-introduce a new kind of error when the wrong chunk ranks high.
-
-**Known limitation of the current judge**: it sees only the traceback and
-`expected_cause` / `expected_fix_location`, never the retrieved source. A
-correct detail RAG-on pulled from source but that isn't restated in those
-known facts -- like `post_id` above -- reads as unverified to the judge in
-exactly the same way a genuinely invented detail would. The judge cannot
-currently tell "true but not in the known facts" apart from "fabricated."
-That's a harness limitation, not a generator finding; see the roadmap item
-to give the judge the retrieved chunks.
+From the earlier `evals/results/20260916T235351Z.json` run: the judge's
+own reasoning showed RAG-on anchoring on an adjacent retrieved chunk for
+`missing_post_key`, redirecting the fix to a retrieved template instead
+of the view. Retrieval reduces fabrication; it does not eliminate it, and
+a wrong chunk ranking high introduces its own kind of error. Whether that
+recurs across more fixtures is exactly what the roadmap's "Retrieval
+anchoring" item would test (see `docs/roadmap.md`).
 
 ## Spot-checking claim statuses
 
