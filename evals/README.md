@@ -271,6 +271,21 @@ applies to every fixture, not just this one -- any two classes in
 `blog/models.py` or `blog/views.py` that happen to share a method name
 were equally exposed.
 
+**Same fixture, a second gap: only half the loop.** Disambiguating by
+class fixed which method came back, but not how much of the cycle. When
+the frame resolves to `Comment.__str__`, the extracted source used to
+stop at `return self.summary` -- the judge was asked to verify claims
+about a recursion loop while looking at only one side of it.
+`_extract_function_source` now also pulls in, one level deep, any other
+method on the same class that the matched method's body reaches through
+an explicit `self.<name>` attribute access, so a `__str__`-anchored
+extraction now includes `summary` too. This is not fully symmetric:
+`Comment.summary` reaches back into `__str__` through `str(self)`, a
+call, not a `self.__str__` attribute access, so the reverse case (frame
+resolves to `summary`) still shows only `summary` alone. Whether that
+residual gap is worth closing depends on how often that parity actually
+occurs in practice -- unmeasured, same as above.
+
 ## Spot-checking claim statuses
 
 `evals/spotcheck.py` is not a verifier -- claims are English, and nothing

@@ -43,16 +43,56 @@ def _extract_function_source(file_text, function_name, lineno):
     `lineno` (the frame's line, or the view's `co_firstlineno` when there
     is no frame) disambiguates by pointing at the actual definition that
     ran.
+
+    If the matched method is itself a class method, also appends the
+    source of any other method on the same class that its body reaches
+    via `self.<name>` -- one level, not followed recursively. Without
+    this, a two-method cycle like `Comment.__str__` returning
+    `self.summary` while `Comment.summary` calls back into `str(self)`
+    shows the judge only half the loop it is asked to verify claims
+    about.
     """
     tree = ast.parse(file_text)
+
+    target = None
     for node in ast.walk(tree):
         if (
             isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
             and node.name == function_name
             and node.lineno <= lineno <= (node.end_lineno or node.lineno)
         ):
-            return ast.get_source_segment(file_text, node)
-    return None
+            target = node
+            break
+    if target is None:
+        return None
+
+    source = ast.get_source_segment(file_text, target)
+
+    enclosing_class = next(
+        (
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ClassDef) and target in node.body
+        ),
+        None,
+    )
+    if enclosing_class is not None:
+        self_referenced = {
+            child.attr
+            for child in ast.walk(target)
+            if isinstance(child, ast.Attribute)
+            and isinstance(child.value, ast.Name)
+            and child.value.id == "self"
+        }
+        for method in enclosing_class.body:
+            if (
+                isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and method is not target
+                and method.name in self_referenced
+            ):
+                source += "\n\n" + ast.get_source_segment(file_text, method)
+
+    return source
 
 
 def _extract_url_pattern(urls_text, view_name):
@@ -71,11 +111,13 @@ def _extract_url_pattern(urls_text, view_name):
 
 def _build_judge_source(fixture, exception):
     """(label, content) pairs for evals.judge.format_source_section: the
-    failing function's own source, the urls.py pattern that routes to this
-    fixture's view, and any templates the fixture names via its `templates`
-    field. Deliberately not whole modules -- 300 lines of unrelated views is
-    exactly the kind of noise that makes the judge assume "unverified"
-    rather than check.
+    failing function's own source (plus, for a method, one level of any
+    other same-class method it reaches via `self.<name>` --
+    see `_extract_function_source`), the urls.py pattern that routes to
+    this fixture's view, and any templates the fixture names via its
+    `templates` field. Deliberately not whole modules -- 300 lines of
+    unrelated views is exactly the kind of noise that makes the judge
+    assume "unverified" rather than check.
 
     `exception` is the real exception instance the fixture raised (with its
     original __traceback__), or None if it wasn't captured. Its innermost
