@@ -25,28 +25,10 @@ Sequencing below follows from that.
 
 ## Sequenced queue
 
-1. **django-docs-links**: cross-reference explanations to official Django documentation.
-   Ship the cheap version first: a static map of exception type plus context to a docs
-   anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
-   generated prose is not, which matters most for the learning audience and shrinks the
-   hallucination surface.
-   Resolve before starting:
-   - Django docs license terms for redistributing a derived map or index.
-   - Version pinning. URLs carry a version segment, and serving 5.2 links to a user on 4.2
-     is worse than no link.
-   - Translated docs coverage, now that `EXPLAIN_ERRORS_LANGUAGE` has shipped.
-     `docs.djangoproject.com` has translations with uneven coverage, so a localized link may
-     404 or silently fall back.
-   Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
-
-2. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
-   backed by shipped behavior. Not before. The README documents shipped behavior; anything
-   earlier is a promise that has to be kept.
-   Verify: the README lead paragraph describes a grounded Django learning aid rather than an
-   error explainer.
-
-3. **Debug page injection**: append the explanation into the debug page HTML rather than only
-   stdout. The latency question is settled: eval harness measurements (`evals/README.md`'s
+1. **Debug page injection**: append the explanation into the debug page HTML rather than only
+   stdout. First because it is unblocked: the latency question is settled and the
+   extension points are known, while django-docs-links still has open licensing,
+   version-pinning, and translation questions. The latency question is settled: eval harness measurements (`evals/README.md`'s
    Results section) put generator p50 at 1.8 to 2.1s, squarely inside the "build the blocking
    version" range the decision rule called for. Build the blocking version.
 
@@ -69,6 +51,28 @@ Sequencing below follows from that.
    `ExceptionReporter.html_template_path` are supported extension points and the package
    already requires Django 4.2+, so this is a subclass plus a template override, not surgery.
    Verify: `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` appears in `explain_errors/` on `main`.
+
+2. **django-docs-links**: cross-reference explanations to official Django documentation.
+   Ship the cheap version first: a static map of exception type plus context to a docs
+   anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
+   generated prose is not, which matters most for the learning audience and shrinks the
+   hallucination surface.
+   Ships after debug page injection so links render clickable in the browser
+   rather than as text in stdout.
+   Resolve before starting:
+   - Django docs license terms for redistributing a derived map or index.
+   - Version pinning. URLs carry a version segment, and serving 5.2 links to a user on 4.2
+     is worse than no link.
+   - Translated docs coverage, now that `EXPLAIN_ERRORS_LANGUAGE` has shipped.
+     `docs.djangoproject.com` has translations with uneven coverage, so a localized link may
+     404 or silently fall back.
+   Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
+
+3. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
+   backed by shipped behavior. Not before. The README documents shipped behavior; anything
+   earlier is a promise that has to be kept.
+   Verify: the README lead paragraph describes a grounded Django learning aid rather than an
+   error explainer.
 
 ## Conditional or unscheduled
 
