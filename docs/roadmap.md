@@ -153,6 +153,13 @@ Sequencing below follows from that.
 ## Loose ends (not tasks)
 Fold each into whichever branch already touches the relevant file.
 
+- README typography pass (remove em dashes). The Production Safety section (and its one
+  touched line in Installation) were written without em dashes, but the rest of the README
+  still uses them throughout. A full sweep replacing em dashes with commas, parentheses,
+  colons, or periods is a separate, purely cosmetic concern, not part of production-safety
+  docs or the positioning rewrite. Fold into whichever branch next touches `README.md`, or do
+  it standalone.
+  Verify: no em dash (`—`) appears in `README.md` on `main`.
 - No Python/Django version matrix in CI. `.github/workflows/test.yml` now runs the suite on
   every push and pull request (with and without the `[rag]` extra), but always against a
   single Python/Django combination. `setup.py` declares `Django>=4.2` and
