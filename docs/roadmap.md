@@ -83,6 +83,24 @@ Sequencing below follows from that.
   failing frame. Test with the harness before and after.
   Verify: a harness run recorded in evals/README.md compares the change.
 
+- **working-tree-diff-context**: include `git diff HEAD`, scoped to files that appear
+  as project frames in the traceback, in the prompt so the explanation can name the
+  edit that caused the error. Input to the model only; nothing new is displayed. In
+  local development the breaking change is usually uncommitted, which `git log` never
+  shows, so the diff is the signal and history is not.
+  Unproven: RAG already retrieves current source, and may reach the same answer when
+  both sides of a mismatch are retrieved (a renamed model field plus the view still
+  using the old name). The diff's distinct value, if any, is where current source alone
+  is ambiguous: renamed versus deleted versus never existed.
+  Build the harness comparison first: 4 to 5 regression fixtures, each a working
+  baseline plus a breaking uncommitted edit, including at least one where RAG alone
+  plausibly succeeds. Give the judge the diff, or correct diff-derived details will
+  score as fabrication. Ship only if diff-on beats diff-off.
+  If shipped: gated behind `EXPLAIN_ERRORS_INCLUDE_DIFF`, default `False`; diff passes
+  through existing sanitization before leaving the machine; git only, degrading
+  silently with no repository or no `git` binary.
+  Verify: `EXPLAIN_ERRORS_INCLUDE_DIFF` appears in `explain_errors/` on `main`.
+
 - **dedup-identical-errors**: LRU hash of exception type plus top frame, so repeated
   identical errors do not burn the sliding-window throttle. Small, slot in anywhere.
   Verify: an LRU or hash-based seen-errors cache exists in `explain_errors/middleware.py`.
