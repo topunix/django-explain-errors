@@ -74,6 +74,12 @@ Sequencing below follows from that.
    Verify: the README lead paragraph describes a grounded Django learning aid rather than an
    error explainer.
 
+   - **Production Safety section**: document the safe middleware registration pattern
+     (register only when `DEBUG` is on) plus a CI guard (`manage.py check --deploy`) against
+     shipping the middleware to production by accident. Lands on its own branch and commit,
+     ahead of the rest of the positioning rewrite.
+     Verify: `README.md` on `main` has a `## Production Safety` heading.
+
 ## Conditional or unscheduled
 
 - **Retrieval anchoring**: the eval harness showed RAG-on can anchor on an adjacent
