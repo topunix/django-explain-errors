@@ -25,34 +25,7 @@ Sequencing below follows from that.
 
 ## Sequenced queue
 
-1. **Debug page injection**: append the explanation into the debug page HTML rather than only
-   stdout. First because it is unblocked: the latency question is settled and the
-   extension points are known, while django-docs-links still has open licensing,
-   version-pinning, and translation questions. The latency question is settled: eval harness measurements (`evals/README.md`'s
-   Results section) put generator p50 at 1.8 to 2.1s, squarely inside the "build the blocking
-   version" range the decision rule called for. Build the blocking version.
-
-   The placement argument is sound: when a 500 fires the developer is in the browser, not the
-   terminal, and stdout requires a context switch to a console that may not be visible.
-
-   The cost is narrower than it first appears. `process_exception` runs synchronously in the
-   request path, so the debug page already does not render until the API call returns, in
-   preserve mode as much as in default mode. That tax is paid today on every 500. Injection
-   adds no new blocking; it only changes the destination of text the developer already waited
-   for.
-
-   Ship gated behind `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`, default `False`. Usage then answers
-   whether it was worth building.
-
-   Only inject what stdout cannot already show. Identical text is redundant; explanations
-   grounded in the user's own code via RAG are something the debug page genuinely lacks.
-
-   Implementation is less fragile than it looks. `DEFAULT_EXCEPTION_REPORTER` and
-   `ExceptionReporter.html_template_path` are supported extension points and the package
-   already requires Django 4.2+, so this is a subclass plus a template override, not surgery.
-   Verify: `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` appears in `explain_errors/` on `main`.
-
-2. **django-docs-links**: cross-reference explanations to official Django documentation.
+1. **django-docs-links**: cross-reference explanations to official Django documentation.
    Ship the cheap version first: a static map of exception type plus context to a docs
    anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
    generated prose is not, which matters most for the learning audience and shrinks the
@@ -68,7 +41,7 @@ Sequencing below follows from that.
      404 or silently fall back.
    Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
 
-3. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
+2. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
    backed by shipped behavior. Not before. The README documents shipped behavior; anything
    earlier is a promise that has to be kept.
    Verify: the README lead paragraph describes a grounded Django learning aid rather than an
