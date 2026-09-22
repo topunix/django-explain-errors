@@ -6,10 +6,13 @@ from django.http import JsonResponse
 from asgiref.sync import sync_to_async
 
 from .client import get_openai_client
+from .debug_page import ExplainErrorsExceptionReporter
 from .sanitize import sanitize_traceback
 from .throttle import SlidingWindowThrottle
 from .tracebacks import format_traceback
 from .rag.retriever import format_chunks_for_prompt, retrieve_chunks
+
+DEFAULT_EXCEPTION_REPORTER_PATH = "django.views.debug.ExceptionReporter"
 
 logger = logging.getLogger(__name__)
 
@@ -190,9 +193,43 @@ class ExplainErrorsMiddleware:
                 # a 500 so the request lifecycle completes cleanly.
                 print("Failed to get an explanation from OpenAI:", e)
 
+            if explanation is not None:
+                self._inject_debug_page(request, explanation)
+
         if getattr(settings, "EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE", True):
             return None
 
         return JsonResponse(
             {"error": "An error occurred.", "message": explanation}, status=500
         )
+
+    def _inject_debug_page(self, request, explanation):
+        """Wire the explanation into the debug page, if all conditions hold.
+
+        Never overrides a user's own exception_reporter_class or a custom
+        DEFAULT_EXCEPTION_REPORTER; skips and logs at debug level instead.
+        """
+        if not getattr(settings, "EXPLAIN_ERRORS_INJECT_DEBUG_PAGE", True):
+            return
+        if not getattr(settings, "EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE", True):
+            return
+
+        if getattr(request, "exception_reporter_class", None) is not None:
+            logger.debug(
+                "explain_errors: request already has an exception_reporter_class, "
+                "skipping debug page injection"
+            )
+            return
+
+        default_reporter_path = getattr(
+            settings, "DEFAULT_EXCEPTION_REPORTER", DEFAULT_EXCEPTION_REPORTER_PATH
+        )
+        if default_reporter_path != DEFAULT_EXCEPTION_REPORTER_PATH:
+            logger.debug(
+                "explain_errors: DEFAULT_EXCEPTION_REPORTER is customized, "
+                "skipping debug page injection"
+            )
+            return
+
+        request._explain_errors_explanation = explanation
+        request.exception_reporter_class = ExplainErrorsExceptionReporter
