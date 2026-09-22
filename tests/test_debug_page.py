@@ -12,6 +12,14 @@ from django.views.debug import ExceptionReporter
 from explain_errors.debug_page import ExplainErrorsExceptionReporter
 
 
+class _RaisingBool:
+    """A settings value that raises when evaluated for truthiness, to
+    simulate an internal failure inside debug page injection setup."""
+
+    def __bool__(self):
+        raise RuntimeError("simulated settings access failure")
+
+
 def _mock_openai():
     patcher = patch("openai.OpenAI")
     mock_cls = patcher.start()
@@ -175,6 +183,21 @@ class DebugPageRequestCycleTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 500)
         self.assertNotIn('id="explain-errors"', response.content.decode())
+
+    @override_settings(EXPLAIN_ERRORS_INJECT_DEBUG_PAGE=_RaisingBool())
+    def test_injection_setup_failure_falls_back_to_plain_debug_page(self):
+        client = Client(raise_request_exception=False)
+
+        with self.assertLogs("explain_errors", level="WARNING") as cm:
+            response = client.get("/boom/")
+
+        self.assertEqual(response.status_code, 500)
+        content = response.content.decode()
+        self.assertNotIn('id="explain-errors"', content)
+        self.assertIn("ValueError", content)
+        self.assertTrue(
+            any("debug page injection setup failed" in message for message in cm.output)
+        )
 
     def test_accept_text_plain_unchanged(self):
         client = Client(raise_request_exception=False)

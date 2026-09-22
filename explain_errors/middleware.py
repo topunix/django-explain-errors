@@ -208,28 +208,34 @@ class ExplainErrorsMiddleware:
 
         Never overrides a user's own exception_reporter_class or a custom
         DEFAULT_EXCEPTION_REPORTER; skips and logs at debug level instead.
+        Fails open: any problem here must not break the debug page.
         """
-        if not getattr(settings, "EXPLAIN_ERRORS_INJECT_DEBUG_PAGE", True):
-            return
-        if not getattr(settings, "EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE", True):
-            return
+        try:
+            if not getattr(settings, "EXPLAIN_ERRORS_INJECT_DEBUG_PAGE", True):
+                return
+            if not getattr(settings, "EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE", True):
+                return
 
-        if getattr(request, "exception_reporter_class", None) is not None:
-            logger.debug(
-                "explain_errors: request already has an exception_reporter_class, "
-                "skipping debug page injection"
+            if getattr(request, "exception_reporter_class", None) is not None:
+                logger.debug(
+                    "explain_errors: request already has an exception_reporter_class, "
+                    "skipping debug page injection"
+                )
+                return
+
+            default_reporter_path = getattr(
+                settings, "DEFAULT_EXCEPTION_REPORTER", DEFAULT_EXCEPTION_REPORTER_PATH
             )
-            return
+            if default_reporter_path != DEFAULT_EXCEPTION_REPORTER_PATH:
+                logger.debug(
+                    "explain_errors: DEFAULT_EXCEPTION_REPORTER is customized, "
+                    "skipping debug page injection"
+                )
+                return
 
-        default_reporter_path = getattr(
-            settings, "DEFAULT_EXCEPTION_REPORTER", DEFAULT_EXCEPTION_REPORTER_PATH
-        )
-        if default_reporter_path != DEFAULT_EXCEPTION_REPORTER_PATH:
-            logger.debug(
-                "explain_errors: DEFAULT_EXCEPTION_REPORTER is customized, "
-                "skipping debug page injection"
+            request._explain_errors_explanation = explanation
+            request.exception_reporter_class = ExplainErrorsExceptionReporter
+        except Exception:
+            logger.warning(
+                "explain_errors: debug page injection setup failed", exc_info=True
             )
-            return
-
-        request._explain_errors_explanation = explanation
-        request.exception_reporter_class = ExplainErrorsExceptionReporter
