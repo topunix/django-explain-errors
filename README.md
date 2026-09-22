@@ -1,12 +1,14 @@
 # Django Explain Errors Middleware
 
 This Django middleware captures unhandled errors and exceptions, sends them
-to a language model for explanation, and prints the explanation to stdout
-when debug mode is enabled. It works with the OpenAI API out of the box, with
-Anthropic's Claude models through Anthropic's OpenAI-compatible endpoint, and
-with any other OpenAI-compatible endpoint (Ollama, LM Studio, Azure, or a
-corporate gateway) by setting a base URL, so explanations can run entirely on
-a local model if you prefer not to send code off your machine.
+to a language model for explanation, and, when debug mode is enabled, shows
+the explanation on Django's debug page directly under the exception
+headline, as well as printing it to stdout. It works with the OpenAI API
+out of the box, with Anthropic's Claude models through Anthropic's
+OpenAI-compatible endpoint, and with any other OpenAI-compatible endpoint
+(Ollama, LM Studio, Azure, or a corporate gateway) by setting a base URL,
+so explanations can run entirely on a local model if you prefer not to send
+code off your machine.
 
 It can optionally ground explanations in your own project source using a
 local vector index (RAG), so explanations reference the actual code that
@@ -22,8 +24,9 @@ rate limited.
 ## Scope
 
 This package explains errors for a person, not for a coding agent to consume
-programmatically. The explanation is written for a human reader, in a terminal or an editor's
-integrated terminal, and the output format assumes that reader.
+programmatically. The explanation is written for a human reader, on Django's
+debug page in the browser or in a terminal, and the output format assumes
+that reader.
 
 If a coding agent is doing the debugging, it does not need this. Agents read tracebacks directly,
 and tools that expose live runtime state (debugger-over-MCP servers, `mcp-django`) serve that case
@@ -34,6 +37,11 @@ Local development only. It requires `DEBUG = True` and is inert otherwise.
 ## Features
 
 - Captures Django errors and exceptions
+- Shows the explanation on Django's debug page, directly under the
+  exception headline (`EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`, on by default)
+- Always prints the explanation to stdout, for terminal workflows and logs
+- Optional JSON 500 response instead of the debug page
+  (`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False`)
 - Explains errors using OpenAI, Anthropic's Claude models, or any other
   OpenAI-compatible endpoint (Ollama, LM Studio, Azure, gateways) via `OPENAI_BASE_URL`
 - Optional codebase-aware explanations (RAG) backed by a local sqlite-vec index (see the RAG section below)
@@ -122,7 +130,7 @@ python manage.py check --deploy --fail-level WARNING
 
 2. **Trigger an error in your Django application**:
 
-   The middleware captures the error, sends it to the configured model for explanation, and prints the explanation to stdout. By default (`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True`), it then lets exception handling continue normally, so Django (or whatever else is watching, such as `runserver_plus` or Sentry — see Compatibility below) renders exactly what it would without this middleware installed. Set `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False` to instead get a JSON `500` response containing the error message and the explanation.
+   The middleware captures the error, sends it to the configured model for explanation, prints the explanation to stdout, and adds it as a banner on Django's debug page. By default (`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True`), exception handling then continues normally, so Django (or whatever else is watching, such as `runserver_plus` or Sentry, see Compatibility below) renders its usual response. The only change is the banner on Django's own debug page. Set `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE = False` to remove it, or `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False` to instead get a JSON `500` response containing the error message and the explanation.
 
 ## Async Support
 
@@ -143,7 +151,7 @@ Controlled by `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`, default `True`. Injection happ
 when all of the following hold:
 
 - `DEBUG` is `True`
-- `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` is `True`
+- `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` is `True` (the default)
 - `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` is `True` (the default). With
   `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False`, the JSON 500 path runs instead and there is
   no debug page to inject into.
