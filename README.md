@@ -133,6 +133,40 @@ The middleware exposes both `sync_capable = True` and `async_capable = True`. At
 
 No additional settings are needed. See Installation above for where to place the middleware in `MIDDLEWARE`.
 
+## Debug page injection
+
+When Django renders its debug page for a 500, `explain_errors` also inserts a banner
+containing the explanation directly under the exception headline, in addition to printing
+it to stdout.
+
+Controlled by `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`, default `True`. Injection happens only
+when all of the following hold:
+
+- `DEBUG` is `True`
+- `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` is `True`
+- `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` is `True` (the default). With
+  `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False`, the JSON 500 path runs instead and there is
+  no debug page to inject into.
+- an explanation was actually produced (not throttled, and the API call succeeded)
+
+The banner appears only on the HTML debug page, styled inline (bordered box, light
+background) so it reads on Django's page. The explanation is HTML-escaped and rendered in
+a scrollable block; it is never marked safe.
+
+**Fails open.** Any problem building or inserting the banner (a missing request, an
+unexpected debug page layout, anything else) logs one warning and leaves Django's normal
+debug page untouched. This code can never turn a working debug page into a broken one.
+
+**Custom exception reporters.** If your project already sets a custom
+`DEFAULT_EXCEPTION_REPORTER`, or something earlier in the request sets
+`request.exception_reporter_class`, `explain_errors` leaves it alone and skips injection
+(logged at debug level) rather than overriding it.
+
+**Upgrading.** Turning this on, or upgrading to a version where it defaults on, changes
+what Django's debug page looks like: a new section appears above the request metadata
+table. If you rely on the debug page's exact markup (a scraper, a screenshot test), account
+for this.
+
 ## Compatibility
 
 How this middleware interacts with other error-handling and debugging tools, in the default
@@ -170,6 +204,7 @@ developer is actually investigating.
 | `OPENAI_TIMEOUT` | No | Request timeout in seconds for the OpenAI client. Defaults to `10`. |
 | `OPENAI_MAX_TRACEBACK_CHARS` | No | Total character budget for the traceback sent to the model. Application frames (your own code, as opposed to Django, the standard library, or installed packages) are always kept; library frames fill whatever budget remains, nearest the raise point first, with an `... N library frames omitted ...` line where frames are dropped. If the application frames alone exceed the budget, falls back to keeping the last N characters of the raw traceback. Defaults to `3000`. |
 | `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` | No | When `True` (the default), the middleware prints the explanation to stdout and returns `None`, so exception handling continues normally and Django renders its standard debug page. Set to `False` to instead return a JSON 500 response, which ends exception handling early (see Compatibility above). |
+| `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` | No | When `True` (the default), also injects the explanation as a banner into Django's debug page, in addition to stdout. Requires `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True` (the default); see Debug Page Injection above. |
 | `OPENAI_BASE_URL` (env or settings) | No | Base URL for any OpenAI-compatible API (for example Ollama at `http://localhost:11434/v1`). When set, a missing API key is replaced with a placeholder since local servers do not require one. |
 | `EXPLAIN_ERRORS_MAX_CALLS` | No | Together with `EXPLAIN_ERRORS_WINDOW_SECONDS`, caps API spend to at most this many explanations within a rolling window; once the cap is hit, further errors in that window are not sent for explanation until an earlier call ages out. Defaults to `5`. |
 | `EXPLAIN_ERRORS_WINDOW_SECONDS` | No | Length in seconds of the rolling window `EXPLAIN_ERRORS_MAX_CALLS` is measured against. Defaults to `60` (with the defaults, at most 5 explanations per 60-second window). |
