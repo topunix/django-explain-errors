@@ -74,6 +74,12 @@ Sequencing below follows from that.
    Verify: the README lead paragraph describes a grounded Django learning aid rather than an
    error explainer.
 
+   - **Production Safety section**: document the safe middleware registration pattern
+     (register only when `DEBUG` is on) plus a CI guard (`manage.py check --deploy`) against
+     shipping the middleware to production by accident. Lands on its own branch and commit,
+     ahead of the rest of the positioning rewrite.
+     Verify: `README.md` on `main` has a `## Production Safety` heading.
+
 ## Conditional or unscheduled
 
 - **Retrieval anchoring**: the eval harness showed RAG-on can anchor on an adjacent
@@ -147,6 +153,13 @@ Sequencing below follows from that.
 ## Loose ends (not tasks)
 Fold each into whichever branch already touches the relevant file.
 
+- README typography pass (remove em dashes). The Production Safety section (and its one
+  touched line in Installation) were written without em dashes, but the rest of the README
+  still uses them throughout. A full sweep replacing em dashes with commas, parentheses,
+  colons, or periods is a separate, purely cosmetic concern, not part of production-safety
+  docs or the positioning rewrite. Fold into whichever branch next touches `README.md`, or do
+  it standalone.
+  Verify: no em dash (`—`) appears in `README.md` on `main`.
 - No Python/Django version matrix in CI. `.github/workflows/test.yml` now runs the suite on
   every push and pull request (with and without the `[rag]` extra), but always against a
   single Python/Django combination. `setup.py` declares `Django>=4.2` and

@@ -53,13 +53,16 @@ pip install django-explain-errors
 
 2. **Add the middleware to your Django project**:
 
-   - Open your `settings.py` file and add the middleware to the `MIDDLEWARE` list:
+   - Open your `settings.py` file and register the middleware only when `DEBUG` is on (see
+     Production Safety below for why):
 
      ```python
      MIDDLEWARE = [
          ...
-         'explain_errors.middleware.ExplainErrorsMiddleware',
      ]
+
+     if DEBUG:
+         MIDDLEWARE.append('explain_errors.middleware.ExplainErrorsMiddleware')
      ```
 
      In the default preserve mode, `process_exception` returns `None`, so exception handling
@@ -81,6 +84,31 @@ pip install django-explain-errors
 
    The API key is not required if you set `OPENAI_BASE_URL` to a local
    server such as Ollama, which does not authenticate requests.
+
+## Production Safety
+
+This middleware is intended for local development only. When active, it sends exception
+tracebacks to the configured LLM provider, which may include source code, file paths, and
+local variable values. Keep it out of production.
+
+**Primary safeguard:** register the middleware only when `DEBUG` is on, or only in your
+development settings module:
+
+```python
+# settings.py
+if DEBUG:
+    MIDDLEWARE.append("explain_errors.middleware.ExplainErrorsMiddleware")
+```
+
+Appending inside the `if DEBUG:` block still keeps the middleware last in the list, as required
+(see Installation above).
+
+**Secondary safeguard:** run Django's deployment checks in CI against your production settings.
+This fails the build if `DEBUG = True` (`security.W018`):
+
+```bash
+python manage.py check --deploy --fail-level WARNING
+```
 
 ## Usage
 
