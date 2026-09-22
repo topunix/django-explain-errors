@@ -67,16 +67,23 @@ in the same PR that ships it.
    `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` (default `True`; when `True`,
    `process_exception()` still prints the stdout explanation but returns
    `None` so the handler re-raises the original exception instead of
-   returning a JSON 500. Set to `False` to restore the JSON 500 path.)
+   returning a JSON 500. Set to `False` to restore the JSON 500 path.),
+   `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` (default `True`; when `True` and
+   `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` is also `True`, injects the
+   explanation as a banner into Django's debug page via
+   `explain_errors.debug_page.ExplainErrorsExceptionReporter`, in addition
+   to stdout. Fails open and never overrides a user's own
+   `exception_reporter_class` or a custom `DEFAULT_EXCEPTION_REPORTER`.)
 RAG settings (all optional, see docs/rag-design.md):
 - `EXPLAIN_ERRORS_RAG_ENABLED` (default False)
 - `EXPLAIN_ERRORS_RAG_INDEX_PATH`, `EXPLAIN_ERRORS_RAG_TOP_K`,
   `EXPLAIN_ERRORS_RAG_EMBED_MODEL`, `EXPLAIN_ERRORS_RAG_INCLUDE`,
   `EXPLAIN_ERRORS_RAG_EXCLUDE`, `EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS`
 5. New features must be opt-in via settings flags. Default behavior for
-   existing users must not change, with one pre-1.0 exception:
+   existing users must not change, with two pre-1.0 exceptions:
    `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` flips to default `True` under
-   `preserve-mode-default` (see roadmap).
+   `preserve-mode-default` (see roadmap), and `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`
+   defaults to `True` under `debug-page-injection`.
 6. Supported: Python 3.9+, Django 4.2+.
 7. All externally transmitted or persistently indexed traceback text must
    pass through `explain_errors.sanitize.sanitize_traceback()`. This
