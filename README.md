@@ -39,7 +39,8 @@ Local development only. It requires `DEBUG = True` and is inert otherwise.
 - Captures Django errors and exceptions
 - Shows the explanation on Django's debug page, directly under the
   exception headline (`EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`, on by default)
-- Always prints the explanation to stdout, for terminal workflows and logs
+- Prints the explanation to stdout, for terminal workflows and logs
+  (`EXPLAIN_ERRORS_PRINT_STDOUT`, on by default)
 - Optional JSON 500 response instead of the debug page
   (`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False`)
 - Explains errors using OpenAI, Anthropic's Claude models, or any other
@@ -213,6 +214,7 @@ developer is actually investigating.
 | `OPENAI_MAX_TRACEBACK_CHARS` | No | Total character budget for the traceback sent to the model. Application frames (your own code, as opposed to Django, the standard library, or installed packages) are always kept; library frames fill whatever budget remains, nearest the raise point first, with an `... N library frames omitted ...` line where frames are dropped. If the application frames alone exceed the budget, falls back to keeping the last N characters of the raw traceback. Defaults to `3000`. |
 | `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` | No | When `True` (the default), the middleware prints the explanation to stdout and returns `None`, so exception handling continues normally and Django renders its debug page (with the explanation banner, controlled by `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`). Set to `False` to instead return a JSON 500 response, which ends exception handling early (see Compatibility above). |
 | `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` | No | When `True` (the default), also injects the explanation as a banner into Django's debug page, in addition to stdout. Requires `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True` (the default); see Debug Page Injection above. |
+| `EXPLAIN_ERRORS_PRINT_STDOUT` | No | When `True` (the default), prints the explanation to stdout. Set to `False` to suppress it — for example if `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` already shows it in the browser and you don't want it printed twice. The failure message (when the OpenAI call itself errors) always prints regardless of this setting. For requests that don't render Django's debug page — API clients, `fetch`/HTMX requests, anything that isn't a browser navigation — stdout is the only channel that shows the explanation, so turn this off only in browser-first workflows. |
 | `OPENAI_BASE_URL` (env or settings) | No | Base URL for any OpenAI-compatible API (for example Ollama at `http://localhost:11434/v1`). When set, a missing API key is replaced with a placeholder since local servers do not require one. |
 | `EXPLAIN_ERRORS_MAX_CALLS` | No | Together with `EXPLAIN_ERRORS_WINDOW_SECONDS`, caps API spend to at most this many explanations within a rolling window; once the cap is hit, further errors in that window are not sent for explanation until an earlier call ages out. Defaults to `5`. |
 | `EXPLAIN_ERRORS_WINDOW_SECONDS` | No | Length in seconds of the rolling window `EXPLAIN_ERRORS_MAX_CALLS` is measured against. Defaults to `60` (with the defaults, at most 5 explanations per 60-second window). |
