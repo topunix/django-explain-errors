@@ -95,6 +95,18 @@ class ExplainErrorsMiddleware:
 
             self.openai_client = get_openai_client(timeout=timeout)
 
+            if (
+                not getattr(settings, "EXPLAIN_ERRORS_PRINT_STDOUT", True)
+                and not getattr(settings, "EXPLAIN_ERRORS_INJECT_DEBUG_PAGE", True)
+                and getattr(settings, "EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE", True)
+            ):
+                logger.warning(
+                    "explain_errors: EXPLAIN_ERRORS_PRINT_STDOUT and "
+                    "EXPLAIN_ERRORS_INJECT_DEBUG_PAGE are both False while "
+                    "EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE is True, so explanations "
+                    "will be generated but not shown anywhere"
+                )
+
     def __call__(self, request):
         # Delegate to the async path when wrapped around an async view chain.
         if self._is_async:
@@ -186,8 +198,8 @@ class ExplainErrorsMiddleware:
                         self.max_tokens,
                     )
 
-                # Print the explanation to stdout
-                print("Error Explanation by OpenAI:\n", explanation)
+                if getattr(settings, "EXPLAIN_ERRORS_PRINT_STDOUT", True):
+                    print("Error Explanation by OpenAI:\n", explanation)
             except Exception as e:
                 # If the OpenAI call fails, surface the failure but still return
                 # a 500 so the request lifecycle completes cleanly.

@@ -5,8 +5,10 @@ Project context for Claude Code sessions on django-explain-errors.
 ## What this package is
 
 Django middleware (`explain_errors.ExplainErrorsMiddleware`) that captures
-unhandled exceptions in local development and calls the OpenAI API to print
-a plain-language explanation to stdout. Active only when `DEBUG=True`.
+unhandled exceptions in local development and calls the OpenAI API to
+generate a plain-language explanation, shown on Django's debug page and
+printed to stdout (each controllable by its own setting). Active only when
+`DEBUG=True`.
 
 ## Layout
 
@@ -75,7 +77,11 @@ in the same PR that ships it.
    explanation as a banner into Django's debug page via
    `explain_errors.debug_page.ExplainErrorsExceptionReporter`, in addition
    to stdout. Fails open and never overrides a user's own
-   `exception_reporter_class` or a custom `DEFAULT_EXCEPTION_REPORTER`.)
+   `exception_reporter_class` or a custom `DEFAULT_EXCEPTION_REPORTER`.),
+   `EXPLAIN_ERRORS_PRINT_STDOUT` (default `True`; when `False`, skips only
+   the stdout print of the explanation itself. The OpenAI-failure message
+   always prints. Debug page injection and the JSON 500 response are
+   unaffected.)
 RAG settings (all optional, see docs/rag-design.md):
 - `EXPLAIN_ERRORS_RAG_ENABLED` (default False)
 - `EXPLAIN_ERRORS_RAG_INDEX_PATH`, `EXPLAIN_ERRORS_RAG_TOP_K`,
