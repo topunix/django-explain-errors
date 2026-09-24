@@ -27,8 +27,10 @@ a plain-language explanation to stdout. Active only when `DEBUG=True`.
 ## Commands
 
 - Run tests: `DJANGO_SETTINGS_MODULE=test_settings python -m django test tests -v 2`
-- All existing tests (74) must pass before any commit. Never delete or
-  weaken an existing test to make a change pass.
+- All tests must pass before any commit. Record the test count at the
+  start of the session and report it before and after; the after count
+  must not be lower unless the task explicitly removes tests. Never delete
+  or weaken an existing test to make a change pass.
 
 ## Git and PR conventions
 
