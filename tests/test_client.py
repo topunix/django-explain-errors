@@ -70,8 +70,9 @@ class GetOpenAIClientTest(SimpleTestCase):
 
         self.assertEqual(
             str(ctx.exception),
-            "OpenAI API key not found. Please set the "
-            "OPENAI_API_KEY environment variable.",
+            "API key not found. Set the OPENAI_API_KEY environment "
+            "variable or setting, or set OPENAI_BASE_URL for a local "
+            "server that needs no key.",
         )
 
     @override_settings(OPENAI_API_KEY="test-key")
