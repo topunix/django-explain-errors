@@ -22,8 +22,8 @@ _PRE_STYLE = (
     "overflow-x: auto; white-space: pre-wrap; margin: 4px 0;"
 )
 _P_STYLE = "margin: 6px 0;"
-_UL_STYLE = "margin: 6px 0; padding-left: 1.5em; list-style: disc;"
-_OL_STYLE = "margin: 6px 0; padding-left: 1.5em; list-style: decimal;"
+_UL_STYLE = "margin: 6px 0; padding-inline-start: 1.5em; list-style: disc;"
+_OL_STYLE = "margin: 6px 0; padding-inline-start: 1.5em; list-style: decimal;"
 _LI_STYLE = "margin: 2px 0;"
 
 _LANG_TAG_RE = re.compile(r"^[A-Za-z0-9_+-]*$")
