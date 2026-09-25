@@ -109,8 +109,7 @@ if DEBUG:
     MIDDLEWARE.append("explain_errors.middleware.ExplainErrorsMiddleware")
 ```
 
-Appending inside the `if DEBUG:` block still keeps the middleware last in the list, as required
-(see Installation above).
+See Installation above for where the middleware can sit in `MIDDLEWARE`.
 
 **Secondary safeguard:** run Django's deployment checks in CI against your production settings.
 This fails the build if `DEBUG = True` (`security.W018`):
@@ -212,9 +211,9 @@ developer is actually investigating.
 | `OPENAI_MAX_TOKENS` | No | Ceiling on tokens generated for the explanation, not a target — the system prompt itself asks for a concise answer. Defaults to `1000`; scales up automatically when `EXPLAIN_ERRORS_LANGUAGE` is set (see below), unless you set this explicitly, which always overrides the scaling. |
 | `OPENAI_TIMEOUT` | No | Request timeout in seconds for the OpenAI client. Defaults to `10`. |
 | `OPENAI_MAX_TRACEBACK_CHARS` | No | Total character budget for the traceback sent to the model. Application frames (your own code, as opposed to Django, the standard library, or installed packages) are always kept; library frames fill whatever budget remains, nearest the raise point first, with an `... N library frames omitted ...` line where frames are dropped. If the application frames alone exceed the budget, falls back to keeping the last N characters of the raw traceback. Defaults to `3000`. |
-| `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` | No | When `True` (the default), the middleware prints the explanation to stdout and returns `None`, so exception handling continues normally and Django renders its debug page (with the explanation banner, controlled by `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`). Set to `False` to instead return a JSON 500 response, which ends exception handling early (see Compatibility above). |
+| `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` | No | When `True` (the default), the middleware returns `None` (after printing the explanation to stdout, unless `EXPLAIN_ERRORS_PRINT_STDOUT = False`), so exception handling continues normally and Django renders its debug page (with the explanation banner, controlled by `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`). Set to `False` to instead return a JSON 500 response, which ends exception handling early (see Compatibility above). |
 | `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` | No | When `True` (the default), also injects the explanation as a banner into Django's debug page, in addition to stdout. Requires `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True` (the default); see Debug Page Injection above. |
-| `EXPLAIN_ERRORS_PRINT_STDOUT` | No | When `True` (the default), prints the explanation to stdout. Set to `False` to suppress it — for example if `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` already shows it in the browser and you don't want it printed twice. The failure message (when the OpenAI call itself errors) always prints regardless of this setting. For requests that don't render Django's debug page — API clients, `fetch`/HTMX requests, anything that isn't a browser navigation — stdout is the only channel that shows the explanation, so turn this off only in browser-first workflows. |
+| `EXPLAIN_ERRORS_PRINT_STDOUT` | No | When `True` (the default), prints the explanation to stdout. Set to `False` to suppress it, for example when `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` already shows it in the browser. The failure message (when the model API call itself errors) always prints. For requests where nobody views the debug page (API clients, which get Django's plain-text error response, and `fetch`/HTMX requests, whose HTML response is never displayed), stdout is the only channel that shows the explanation, so turn this off only in browser-first workflows. |
 | `OPENAI_BASE_URL` (env or settings) | No | Base URL for any OpenAI-compatible API (for example Ollama at `http://localhost:11434/v1`). When set, a missing API key is replaced with a placeholder since local servers do not require one. |
 | `EXPLAIN_ERRORS_MAX_CALLS` | No | Together with `EXPLAIN_ERRORS_WINDOW_SECONDS`, caps API spend to at most this many explanations within a rolling window; once the cap is hit, further errors in that window are not sent for explanation until an earlier call ages out. Defaults to `5`. |
 | `EXPLAIN_ERRORS_WINDOW_SECONDS` | No | Length in seconds of the rolling window `EXPLAIN_ERRORS_MAX_CALLS` is measured against. Defaults to `60` (with the defaults, at most 5 explanations per 60-second window). |
@@ -408,6 +407,12 @@ A real result from the eval harness (`missing_fk`, one of the fixtures in
 required `author` foreign key. The traceback the model actually received
 was already truncated to `OPENAI_MAX_TRACEBACK_CHARS`, so it contains no
 application code at all, only Django/SQLite internals:
+
+This example was recorded before 0.7.0, when tracebacks were trimmed to
+their last N characters. Since 0.7.0 your application's frames are always
+kept, so a traceback-only explanation would now see `clone_latest_post`
+too. The measured results in "Does RAG actually help?" below were run
+after that change.
 
 ```
 ...(truncated)...
