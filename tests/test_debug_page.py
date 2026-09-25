@@ -1,3 +1,4 @@
+import datetime
 from unittest.mock import MagicMock, patch
 
 from django.test import (
@@ -53,6 +54,12 @@ class ExplainErrorsExceptionReporterTest(SimpleTestCase):
 
     def setUp(self):
         self.factory = RequestFactory()
+        patcher = patch(
+            "django.views.debug.timezone.now",
+            return_value=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_banner_inserted_between_exception_value_and_meta_table(self):
         request = self.factory.get("/")
