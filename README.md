@@ -10,10 +10,14 @@ OpenAI-compatible endpoint, and with any other OpenAI-compatible endpoint
 so explanations can run entirely on a local model if you prefer not to send
 code off your machine.
 
-It can optionally ground explanations in your own project source using a
-local vector index (RAG), so explanations reference the actual code that
-failed instead of staying generic (measured — see "Does RAG actually
-help?" below).
+Enabling RAG is strongly recommended. With it, the middleware retrieves the
+relevant parts of your own project source from a local vector index, so
+explanations name the actual file and function that failed instead of
+guessing. In the package's eval harness, RAG-grounded explanations won 35
+of 43 blind comparisons, with the gap concentrated in pointing at the right
+fix location and not inventing details (see "Does RAG actually help?"
+below). It is off by default because it needs an optional extra and a
+one-time index build.
 
 The middleware supports both synchronous (WSGI) and asynchronous (ASGI)
 views. It auto-detects the view chain at startup and routes requests through
@@ -45,7 +49,8 @@ Local development only. It requires `DEBUG = True` and is inert otherwise.
   (`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False`)
 - Explains errors using OpenAI, Anthropic's Claude models, or any other
   OpenAI-compatible endpoint (Ollama, LM Studio, Azure, gateways) via `OPENAI_BASE_URL`
-- Optional codebase-aware explanations (RAG) backed by a local sqlite-vec index (see the RAG section below)
+- Codebase-aware explanations via RAG over a local sqlite-vec index
+  (recommended; see "Codebase-aware explanations" below)
 - Explanations in your language via `EXPLAIN_ERRORS_LANGUAGE`, with exception names,
   identifiers, and code kept in English
 - Redacts secrets, tokens, and emails from tracebacks before sending
@@ -334,7 +339,9 @@ also retrieves the most relevant chunks of your own project's source code
 from a local vector index and includes them in the prompt, so explanations
 can reference your actual functions and classes instead of guessing at them.
 
-This feature is opt-in and adds no dependencies or behavior unless enabled.
+Recommended for most projects. It is opt-in only because setup takes three
+steps (install the extra, build the index, enable it), and it adds no
+dependencies or behavior until you do.
 
 ### Install the extra
 
