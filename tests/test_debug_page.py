@@ -78,6 +78,19 @@ class ExplainErrorsExceptionReporterTest(SimpleTestCase):
         self.assertTrue(value_index < banner_index < meta_index)
         self.assertIn("Explained.", html)
 
+    def test_banner_container_and_heading_have_no_dir_attribute(self):
+        request = self.factory.get("/")
+        reporter = _build_reporter(
+            ExplainErrorsExceptionReporter, request, _exc_info(), explanation="Explained."
+        )
+
+        html = reporter.get_traceback_html()
+
+        banner_start = html.index('id="explain-errors"')
+        heading_end = html.index("</h3>")
+        banner_head = html[banner_start:heading_end]
+        self.assertNotIn("dir=", banner_head)
+
     def test_explanation_with_script_tag_is_escaped(self):
         request = self.factory.get("/")
         reporter = _build_reporter(
@@ -244,14 +257,14 @@ class RenderExplanationHtmlTest(SimpleTestCase):
         html = render_explanation_html("```python\nx = 1\n```")
 
         self.assertIn("<pre", html)
-        self.assertIn("<code>x = 1</code>", html)
+        self.assertIn('<code dir="ltr">x = 1</code>', html)
         self.assertNotIn("python", html)
 
     def test_fenced_code_block_without_language_tag(self):
         html = render_explanation_html("```\ny = 2\n```")
 
         self.assertIn("<pre", html)
-        self.assertIn("<code>y = 2</code>", html)
+        self.assertIn('<code dir="ltr">y = 2</code>', html)
 
     def test_unordered_list(self):
         html = render_explanation_html("- one\n- two")
@@ -261,6 +274,11 @@ class RenderExplanationHtmlTest(SimpleTestCase):
         self.assertIn(">one</li>", html)
         self.assertIn(">two</li>", html)
 
+    def test_unordered_list_has_dir_auto(self):
+        html = render_explanation_html("- one\n- two")
+
+        self.assertIn('<ul dir="auto"', html)
+
     def test_ordered_list(self):
         html = render_explanation_html("1. one\n2. two")
 
@@ -269,11 +287,26 @@ class RenderExplanationHtmlTest(SimpleTestCase):
         self.assertIn(">one</li>", html)
         self.assertIn(">two</li>", html)
 
+    def test_ordered_list_has_dir_auto(self):
+        html = render_explanation_html("1. one\n2. two")
+
+        self.assertIn('<ol dir="auto"', html)
+
     def test_paragraphs_and_single_line_breaks(self):
         html = render_explanation_html("line1\nline2\n\npara2")
 
         self.assertIn("line1<br>line2", html)
         self.assertEqual(html.count("<p"), 2)
+
+    def test_paragraph_has_dir_auto(self):
+        html = render_explanation_html("line1\nline2\n\npara2")
+
+        self.assertEqual(html.count('<p dir="auto"'), 2)
+
+    def test_inline_code_has_dir_ltr(self):
+        html = render_explanation_html("Use `foo` here.")
+
+        self.assertIn('<code dir="ltr"', html)
 
     def test_script_tag_in_prose_is_escaped(self):
         html = render_explanation_html("<script>alert(1)</script>")

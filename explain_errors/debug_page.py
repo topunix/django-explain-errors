@@ -71,7 +71,7 @@ def _render_code_block(segment):
             code = rest
     if code.endswith("\n"):
         code = code[:-1]
-    return '<pre style="{style}"><code>{code}</code></pre>'.format(
+    return '<pre dir="ltr" style="{style}"><code dir="ltr">{code}</code></pre>'.format(
         style=_PRE_STYLE, code=escape(code)
     )
 
@@ -92,7 +92,7 @@ def _render_prose(escaped_text):
                 )
                 for line in block_lines
             )
-            blocks.append('<ul style="{}">{}</ul>'.format(_UL_STYLE, items))
+            blocks.append('<ul dir="auto" style="{}">{}</ul>'.format(_UL_STYLE, items))
         elif block_type == "ol":
             items = "".join(
                 '<li style="{}">{}</li>'.format(
@@ -100,10 +100,10 @@ def _render_prose(escaped_text):
                 )
                 for line in block_lines
             )
-            blocks.append('<ol style="{}">{}</ol>'.format(_OL_STYLE, items))
+            blocks.append('<ol dir="auto" style="{}">{}</ol>'.format(_OL_STYLE, items))
         else:
             content = "<br>".join(_render_inline(line) for line in block_lines)
-            blocks.append('<p style="{}">{}</p>'.format(_P_STYLE, content))
+            blocks.append('<p dir="auto" style="{}">{}</p>'.format(_P_STYLE, content))
 
     for raw_line in escaped_text.split("\n"):
         line = raw_line.strip()
@@ -134,7 +134,9 @@ def _render_inline(escaped_line):
     rendered = []
     for index, piece in enumerate(pieces):
         if index % 2 == 1:
-            rendered.append('<code style="{}">{}</code>'.format(_CODE_STYLE, piece[1:-1]))
+            rendered.append(
+                '<code dir="ltr" style="{}">{}</code>'.format(_CODE_STYLE, piece[1:-1])
+            )
         else:
             rendered.append(_BOLD_RE.sub(r"<strong>\1</strong>", piece))
     return "".join(rendered)
