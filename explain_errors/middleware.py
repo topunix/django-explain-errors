@@ -55,9 +55,9 @@ def _default_max_tokens_for_language(language):
 
 class ExplainErrorsMiddleware:
     """
-    Captures unhandled exceptions, asks OpenAI to explain them, and prints the
-    explanation to stdout when DEBUG is True. Supports both sync (WSGI) and
-    async (ASGI) views.
+    Captures unhandled exceptions, asks the configured model to explain them,
+    and prints the explanation to stdout when DEBUG is True. Supports both
+    sync (WSGI) and async (ASGI) views.
     """
 
     async_capable = True
@@ -129,8 +129,8 @@ class ExplainErrorsMiddleware:
         try:
             response = await self.get_response(request)
         except Exception as exception:
-            # process_exception performs blocking OpenAI I/O, so run it in a
-            # thread to keep the event loop free.
+            # process_exception performs blocking model API I/O, so run it in
+            # a thread to keep the event loop free.
             response = await sync_to_async(self.process_exception)(request, exception)
             if response is None:
                 raise
@@ -176,7 +176,7 @@ class ExplainErrorsMiddleware:
                     )
 
             try:
-                # Call OpenAI API
+                # Call model API
                 response = self.openai_client.chat.completions.create(
                     model=self.model,
                     messages=[
@@ -199,11 +199,11 @@ class ExplainErrorsMiddleware:
                     )
 
                 if getattr(settings, "EXPLAIN_ERRORS_PRINT_STDOUT", True):
-                    print("Error Explanation by OpenAI:\n", explanation)
+                    print(f"Error explanation ({self.model}):\n", explanation)
             except Exception as e:
-                # If the OpenAI call fails, surface the failure but still return
-                # a 500 so the request lifecycle completes cleanly.
-                print("Failed to get an explanation from OpenAI:", e)
+                # If the model API call fails, surface the failure but still
+                # return a 500 so the request lifecycle completes cleanly.
+                print("Failed to get an explanation from the model API:", e)
 
             if explanation is not None:
                 self._inject_debug_page(request, explanation)
