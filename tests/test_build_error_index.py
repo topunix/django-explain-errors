@@ -42,7 +42,7 @@ class BuildErrorIndexCommandTest(SimpleTestCase):
         with self.assertRaises(CommandError) as ctx:
             call_command("build_error_index")
         msg = str(ctx.exception)
-        self.assertIn("OpenAI API request failed", msg)
+        self.assertIn("Model API request failed", msg)
         self.assertIn("insufficient_quota", msg)
         self.assertIn("Index not built", msg)
         self.assertEqual(ctx.exception.returncode, 1)

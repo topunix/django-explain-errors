@@ -254,7 +254,7 @@ class ExplainErrorsMiddlewarePreserveDebugPageTest(SimpleTestCase):
         with patch("builtins.print") as mock_print:
             with self.assertRaises(ValueError):
                 mw(self.factory.get("/"))
-        mock_print.assert_any_call("Error Explanation by OpenAI:\n", "Mocked explanation.")
+        mock_print.assert_any_call("Error explanation (gpt-4o-mini):\n", "Mocked explanation.")
 
     @override_settings(EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False)
     def test_preserve_flag_explicitly_off_returns_json_500(self):

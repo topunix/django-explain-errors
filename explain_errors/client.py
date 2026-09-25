@@ -26,8 +26,9 @@ def get_openai_client(timeout=None):
             api_key = PLACEHOLDER_API_KEY
         else:
             raise ValueError(
-                "OpenAI API key not found. Please set the "
-                "OPENAI_API_KEY environment variable."
+                "API key not found. Set the OPENAI_API_KEY environment "
+                "variable or setting, or set OPENAI_BASE_URL for a local "
+                "server that needs no key."
             )
     kwargs = {"api_key": api_key}
     if base_url:

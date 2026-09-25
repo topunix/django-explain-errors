@@ -141,7 +141,7 @@ class DebugPageRequestCycleTest(SimpleTestCase):
         content = response.content.decode()
         self.assertIn('id="explain-errors"', content)
         self.assertIn("Mocked explanation.", content)
-        mock_print.assert_any_call("Error Explanation by OpenAI:\n", "Mocked explanation.")
+        mock_print.assert_any_call("Error explanation (gpt-4o-mini):\n", "Mocked explanation.")
 
     @override_settings(EXPLAIN_ERRORS_INJECT_DEBUG_PAGE=False)
     def test_inject_debug_page_off_no_banner(self):

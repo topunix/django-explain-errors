@@ -18,8 +18,8 @@ class Command(BaseCommand):
         except OpenAIError as exc:
             code = getattr(exc, "code", None) or type(exc).__name__
             raise CommandError(
-                f"OpenAI API request failed ({code}). Check your API key and "
-                "billing at platform.openai.com. Index not built."
+                f"Model API request failed ({code}). Check OPENAI_API_KEY, "
+                "OPENAI_BASE_URL, and your provider account. Index not built."
             ) from exc
         self.stdout.write(
             f"explain_errors: scanned {result['files_scanned']} files, "
