@@ -21,7 +21,10 @@ _PRE_STYLE = (
     "font-family: monospace; background: #eee; padding: 8px; "
     "overflow-x: auto; white-space: pre-wrap; margin: 4px 0;"
 )
-_BLOCK_STYLE = "margin: 4px 0;"
+_P_STYLE = "margin: 6px 0;"
+_UL_STYLE = "margin: 6px 0; padding-left: 1.5em; list-style: disc;"
+_OL_STYLE = "margin: 6px 0; padding-left: 1.5em; list-style: decimal;"
+_LI_STYLE = "margin: 2px 0;"
 
 _LANG_TAG_RE = re.compile(r"^[A-Za-z0-9_+-]*$")
 _INLINE_CODE_RE = re.compile(r"(`[^`\n]*`)")
@@ -84,19 +87,23 @@ def _render_prose(escaped_text):
             return
         if block_type == "ul":
             items = "".join(
-                "<li>{}</li>".format(_render_inline(_UL_STRIP_RE.sub("", line, count=1)))
+                '<li style="{}">{}</li>'.format(
+                    _LI_STYLE, _render_inline(_UL_STRIP_RE.sub("", line, count=1))
+                )
                 for line in block_lines
             )
-            blocks.append('<ul style="{}">{}</ul>'.format(_BLOCK_STYLE, items))
+            blocks.append('<ul style="{}">{}</ul>'.format(_UL_STYLE, items))
         elif block_type == "ol":
             items = "".join(
-                "<li>{}</li>".format(_render_inline(_OL_STRIP_RE.sub("", line, count=1)))
+                '<li style="{}">{}</li>'.format(
+                    _LI_STYLE, _render_inline(_OL_STRIP_RE.sub("", line, count=1))
+                )
                 for line in block_lines
             )
-            blocks.append('<ol style="{}">{}</ol>'.format(_BLOCK_STYLE, items))
+            blocks.append('<ol style="{}">{}</ol>'.format(_OL_STYLE, items))
         else:
             content = "<br>".join(_render_inline(line) for line in block_lines)
-            blocks.append('<p style="{}">{}</p>'.format(_BLOCK_STYLE, content))
+            blocks.append('<p style="{}">{}</p>'.format(_P_STYLE, content))
 
     for raw_line in escaped_text.split("\n"):
         line = raw_line.strip()

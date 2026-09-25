@@ -257,7 +257,7 @@ class RenderExplanationHtmlTest(SimpleTestCase):
         html = render_explanation_html("- one\n- two")
 
         self.assertIn("<ul", html)
-        self.assertEqual(html.count("<li>"), 2)
+        self.assertEqual(html.count("<li "), 2)
         self.assertIn(">one</li>", html)
         self.assertIn(">two</li>", html)
 
@@ -265,7 +265,7 @@ class RenderExplanationHtmlTest(SimpleTestCase):
         html = render_explanation_html("1. one\n2. two")
 
         self.assertIn("<ol", html)
-        self.assertEqual(html.count("<li>"), 2)
+        self.assertEqual(html.count("<li "), 2)
         self.assertIn(">one</li>", html)
         self.assertIn(">two</li>", html)
 
