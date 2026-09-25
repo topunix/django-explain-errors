@@ -10,10 +10,14 @@ OpenAI-compatible endpoint, and with any other OpenAI-compatible endpoint
 so explanations can run entirely on a local model if you prefer not to send
 code off your machine.
 
-It can optionally ground explanations in your own project source using a
-local vector index (RAG), so explanations reference the actual code that
-failed instead of staying generic (measured — see "Does RAG actually
-help?" below).
+Enabling RAG is strongly recommended. With it, the middleware retrieves the
+relevant parts of your own project source from a local vector index, so
+explanations name the actual file and function that failed instead of
+guessing. In the package's eval harness, RAG-grounded explanations won 35
+of 43 blind comparisons, with the gap concentrated in pointing at the right
+fix location and not inventing details (see "Does RAG actually help?"
+below). It is off by default because it needs an optional extra and a
+one-time index build.
 
 The middleware supports both synchronous (WSGI) and asynchronous (ASGI)
 views. It auto-detects the view chain at startup and routes requests through
@@ -45,7 +49,8 @@ Local development only. It requires `DEBUG = True` and is inert otherwise.
   (`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False`)
 - Explains errors using OpenAI, Anthropic's Claude models, or any other
   OpenAI-compatible endpoint (Ollama, LM Studio, Azure, gateways) via `OPENAI_BASE_URL`
-- Optional codebase-aware explanations (RAG) backed by a local sqlite-vec index (see the RAG section below)
+- Codebase-aware explanations via RAG over a local sqlite-vec index
+  (recommended; see "Codebase-aware explanations" below)
 - Explanations in your language via `EXPLAIN_ERRORS_LANGUAGE`, with exception names,
   identifiers, and code kept in English
 - Redacts secrets, tokens, and emails from tracebacks before sending
@@ -85,10 +90,10 @@ pip install django-explain-errors
 
 3. **Set up environment variables**:
 
-   - Create a `.env` file in your project's root directory and add your OpenAI API key. Alternatively, you can set the API key in `settings.py`:
+   - Create a `.env` file in your project's root directory and add your API key. Alternatively, you can set it in `settings.py`:
 
      ```plaintext
-     OPENAI_API_KEY=your_openai_api_key_here
+     OPENAI_API_KEY=your_api_key_here
      ```
 
    The API key is not required if you set `OPENAI_BASE_URL` to a local
@@ -109,8 +114,7 @@ if DEBUG:
     MIDDLEWARE.append("explain_errors.middleware.ExplainErrorsMiddleware")
 ```
 
-Appending inside the `if DEBUG:` block still keeps the middleware last in the list, as required
-(see Installation above).
+See Installation above for where the middleware can sit in `MIDDLEWARE`.
 
 **Secondary safeguard:** run Django's deployment checks in CI against your production settings.
 This fails the build if `DEBUG = True` (`security.W018`):
@@ -133,12 +137,19 @@ python manage.py check --deploy --fail-level WARNING
 
    The middleware captures the error, sends it to the configured model for explanation, prints the explanation to stdout, and adds it as a banner on Django's debug page. By default (`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True`), exception handling then continues normally, so Django (or whatever else is watching, such as `runserver_plus` or Sentry, see Compatibility below) renders its usual response. The only change is the banner on Django's own debug page. Set `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE = False` to remove it, or `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False` to instead get a JSON `500` response containing the error message and the explanation.
 
+   In the terminal, the explanation is printed with the model that produced it:
+
+   ```
+   Error explanation (gpt-4o-mini):
+    The view raised a ValueError because ...
+   ```
+
 ## Async Support
 
 The middleware exposes both `sync_capable = True` and `async_capable = True`. At initialization it inspects `get_response` to decide whether it is part of a sync or async chain:
 
 - Under WSGI (for example `runserver` with sync views), requests flow through the synchronous handler.
-- Under ASGI (for example with async views), requests are awaited through the async handler. The blocking OpenAI call is offloaded with `asgiref.sync.sync_to_async` so the event loop is not blocked.
+- Under ASGI (for example with async views), requests are awaited through the async handler. The blocking model API call is offloaded with `asgiref.sync.sync_to_async` so the event loop is not blocked.
 
 No additional settings are needed. See Installation above for where to place the middleware in `MIDDLEWARE`.
 
@@ -186,7 +197,7 @@ preserve mode and with `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False`:
 | Django Debug Toolbar | Works — Django renders its debug page (with the explanation banner, unless `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE = False`), and Debug Toolbar injects into it. | Broken — the JSON 500 response has no HTML to inject into. |
 | Sentry, Rollbar | Work — the exception propagates and Django re-raises it, so `got_request_exception` fires. | Broken — returning a response ends exception handling before `got_request_exception` fires. |
 | Django REST Framework | Partial — only exceptions DRF does not already handle itself reach this middleware. | Partial, same reason. |
-| Silk and other profiling panels | Timings are inflated by the OpenAI call, since `process_exception` blocks the request path. | Same. |
+| Silk and other profiling panels | Timings are inflated by the model API call, since `process_exception` blocks the request path. | Same. |
 | CORS, GZip, WhiteNoise | No interaction. | No interaction. |
 | `runserver_plus` / Werkzeug debugger | Works — returning `None` re-raises the original exception, and `django-extensions` replaces Django's debug-page renderer with one that re-raises instead, so Werkzeug's WSGI wrapper catches it and shows the interactive debugger. | Broken — the JSON 500 response ends exception handling before it reaches `runserver_plus`'s exception hook, so the Werkzeug debugger never appears. |
 
@@ -210,11 +221,11 @@ developer is actually investigating.
 | `DEBUG` | Yes | The middleware is only active when `DEBUG=True`. When `False`, requests pass through untouched. |
 | `OPENAI_MODEL` | No | Model used for explanations. Defaults to `gpt-4o-mini`. |
 | `OPENAI_MAX_TOKENS` | No | Ceiling on tokens generated for the explanation, not a target — the system prompt itself asks for a concise answer. Defaults to `1000`; scales up automatically when `EXPLAIN_ERRORS_LANGUAGE` is set (see below), unless you set this explicitly, which always overrides the scaling. |
-| `OPENAI_TIMEOUT` | No | Request timeout in seconds for the OpenAI client. Defaults to `10`. |
+| `OPENAI_TIMEOUT` | No | Request timeout in seconds for model API calls. Defaults to `10`. |
 | `OPENAI_MAX_TRACEBACK_CHARS` | No | Total character budget for the traceback sent to the model. Application frames (your own code, as opposed to Django, the standard library, or installed packages) are always kept; library frames fill whatever budget remains, nearest the raise point first, with an `... N library frames omitted ...` line where frames are dropped. If the application frames alone exceed the budget, falls back to keeping the last N characters of the raw traceback. Defaults to `3000`. |
-| `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` | No | When `True` (the default), the middleware prints the explanation to stdout and returns `None`, so exception handling continues normally and Django renders its debug page (with the explanation banner, controlled by `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`). Set to `False` to instead return a JSON 500 response, which ends exception handling early (see Compatibility above). |
+| `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` | No | When `True` (the default), the middleware returns `None` (after printing the explanation to stdout, unless `EXPLAIN_ERRORS_PRINT_STDOUT = False`), so exception handling continues normally and Django renders its debug page (with the explanation banner, controlled by `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`). Set to `False` to instead return a JSON 500 response, which ends exception handling early (see Compatibility above). |
 | `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` | No | When `True` (the default), also injects the explanation as a banner into Django's debug page, in addition to stdout. Requires `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True` (the default); see Debug Page Injection above. |
-| `EXPLAIN_ERRORS_PRINT_STDOUT` | No | When `True` (the default), prints the explanation to stdout. Set to `False` to suppress it — for example if `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` already shows it in the browser and you don't want it printed twice. The failure message (when the OpenAI call itself errors) always prints regardless of this setting. For requests that don't render Django's debug page — API clients, `fetch`/HTMX requests, anything that isn't a browser navigation — stdout is the only channel that shows the explanation, so turn this off only in browser-first workflows. |
+| `EXPLAIN_ERRORS_PRINT_STDOUT` | No | When `True` (the default), prints the explanation to stdout. Set to `False` to suppress it, for example when `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` already shows it in the browser. The failure message (when the model API call itself errors) always prints. For requests where nobody views the debug page (API clients, which get Django's plain-text error response, and `fetch`/HTMX requests, whose HTML response is never displayed), stdout is the only channel that shows the explanation, so turn this off only in browser-first workflows. |
 | `OPENAI_BASE_URL` (env or settings) | No | Base URL for any OpenAI-compatible API (for example Ollama at `http://localhost:11434/v1`). When set, a missing API key is replaced with a placeholder since local servers do not require one. |
 | `EXPLAIN_ERRORS_MAX_CALLS` | No | Together with `EXPLAIN_ERRORS_WINDOW_SECONDS`, caps API spend to at most this many explanations within a rolling window; once the cap is hit, further errors in that window are not sent for explanation until an earlier call ages out. Defaults to `5`. |
 | `EXPLAIN_ERRORS_WINDOW_SECONDS` | No | Length in seconds of the rolling window `EXPLAIN_ERRORS_MAX_CALLS` is measured against. Defaults to `60` (with the defaults, at most 5 explanations per 60-second window). |
@@ -328,7 +339,9 @@ also retrieves the most relevant chunks of your own project's source code
 from a local vector index and includes them in the prompt, so explanations
 can reference your actual functions and classes instead of guessing at them.
 
-This feature is opt-in and adds no dependencies or behavior unless enabled.
+Recommended for most projects. It is opt-in only because setup takes three
+steps (install the extra, build the index, enable it), and it adds no
+dependencies or behavior until you do.
 
 ### Install the extra
 
@@ -351,7 +364,7 @@ python manage.py build_error_index
 
 This walks your project, chunks Python files by top-level function/class
 (and other text files by fixed-size line windows), embeds each chunk with
-the OpenAI embeddings API, and writes them to a local index file. Re-run it
+the configured endpoint's embeddings API, and writes them to a local index file. Re-run it
 whenever your source changes meaningfully. Indexing is not automatic.
 Rebuilding is idempotent: it builds into a temp file and atomically replaces
 the previous index.
@@ -371,15 +384,14 @@ EXPLAIN_ERRORS_RAG_ENABLED = True
 | `EXPLAIN_ERRORS_RAG_ENABLED` | `False` | Master switch for the RAG layer. |
 | `EXPLAIN_ERRORS_RAG_INDEX_PATH` | `<BASE_DIR>/.explain_errors_index.db` | Path to the local vector index file. |
 | `EXPLAIN_ERRORS_RAG_TOP_K` | `4` | Number of chunks retrieved and injected into the prompt. |
-| `EXPLAIN_ERRORS_RAG_EMBED_MODEL` | `"text-embedding-3-small"` | OpenAI embedding model used for indexing and retrieval. |
+| `EXPLAIN_ERRORS_RAG_EMBED_MODEL` | `"text-embedding-3-small"` | Embedding model used for indexing and retrieval. Must exist on the configured endpoint. |
 | `EXPLAIN_ERRORS_RAG_INCLUDE` | `None` (defaults to `BASE_DIR`) | List of directories to index. |
 | `EXPLAIN_ERRORS_RAG_EXCLUDE` | migrations, venvs, `node_modules`, static, media, `.git` | Directory names to skip while indexing. |
 | `EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS` | `6000` | Combined character budget for the traceback + retrieved source sections of the prompt. |
 
 Every chunk of source code and every retrieval query is passed through the
 same `sanitize_traceback()` redaction used for tracebacks, which strips
-patterns that look like secrets, tokens, and emails before anything is sent
-to OpenAI or written to the index. It's a pattern-based filter, not a
+patterns that look like secrets, tokens, and emails before anything is sent to the model API or written to the index. It's a pattern-based filter, not a
 guarantee: it catches recognizable secret shapes, not arbitrary sensitive
 data that doesn't match one.
 
@@ -408,6 +420,12 @@ A real result from the eval harness (`missing_fk`, one of the fixtures in
 required `author` foreign key. The traceback the model actually received
 was already truncated to `OPENAI_MAX_TRACEBACK_CHARS`, so it contains no
 application code at all, only Django/SQLite internals:
+
+This example was recorded before 0.7.0, when tracebacks were trimmed to
+their last N characters. Since 0.7.0 your application's frames are always
+kept, so a traceback-only explanation would now see `clone_latest_post`
+too. The measured results in "Does RAG actually help?" below were run
+after that change.
 
 ```
 ...(truncated)...
@@ -515,5 +533,5 @@ Contributions are welcome! Please open an issue or submit a pull request for any
 ## Acknowledgements
 
 - [Django](https://www.djangoproject.com/)
-- [OpenAI](https://www.openai.com/)
+- [OpenAI Python SDK](https://github.com/openai/openai-python)
 - [python-dotenv](https://github.com/theskumar/python-dotenv)
