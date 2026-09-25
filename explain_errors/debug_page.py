@@ -1,4 +1,5 @@
 import logging
+import re
 
 from django.utils.html import escape
 from django.views.debug import ExceptionReporter
@@ -9,11 +10,127 @@ BANNER_TEMPLATE = """
 <section id="explain-errors" style="border: 1px solid #ccc; background: #fdfdf0; \
 font-family: sans-serif; padding: 10px 15px; margin: 10px 0;">
   <h3 style="margin: 0 0 8px 0;">Explanation (django-explain-errors)</h3>
-  <div style="white-space: pre-wrap; max-height: 16em; overflow-y: auto;">{explanation}</div>
+  <div style="max-height: 16em; overflow-y: auto;">{explanation}</div>
 </section>
 """
 
 ANCHOR = '<table class="meta">'
+
+_CODE_STYLE = "font-family: monospace; background: #eee;"
+_PRE_STYLE = (
+    "font-family: monospace; background: #eee; padding: 8px; "
+    "overflow-x: auto; white-space: pre-wrap; margin: 4px 0;"
+)
+_BLOCK_STYLE = "margin: 4px 0;"
+
+_LANG_TAG_RE = re.compile(r"^[A-Za-z0-9_+-]*$")
+_INLINE_CODE_RE = re.compile(r"(`[^`\n]*`)")
+_BOLD_RE = re.compile(r"\*\*(.+?)\*\*")
+_UL_RE = re.compile(r"^[-*]\s")
+_UL_STRIP_RE = re.compile(r"^[-*]\s+")
+_OL_RE = re.compile(r"^\d+\.\s")
+_OL_STRIP_RE = re.compile(r"^\d+\.\s+")
+
+
+def render_explanation_html(text):
+    """Render a small, safe Markdown subset of a model explanation as HTML.
+
+    Every segment is escaped before any transform runs, and code content
+    (fenced or inline) never goes through the bold/list transforms. Falls
+    back to escaped plain text (matching the pre-`render_explanation_html`
+    behavior) if anything above raises.
+    """
+    try:
+        return _render(text)
+    except Exception:
+        logger.warning(
+            "explain_errors: failed to render explanation markdown", exc_info=True
+        )
+        return '<div style="white-space: pre-wrap;">{}</div>'.format(escape(text))
+
+
+def _render(text):
+    parts = text.split("```")
+    rendered = []
+    for index, part in enumerate(parts):
+        if index % 2 == 1:
+            rendered.append(_render_code_block(part))
+        else:
+            rendered.append(_render_prose(escape(part)))
+    return "".join(rendered)
+
+
+def _render_code_block(segment):
+    code = segment
+    if "\n" in segment:
+        first_line, rest = segment.split("\n", 1)
+        if _LANG_TAG_RE.match(first_line):
+            code = rest
+    if code.endswith("\n"):
+        code = code[:-1]
+    return '<pre style="{style}"><code>{code}</code></pre>'.format(
+        style=_PRE_STYLE, code=escape(code)
+    )
+
+
+def _render_prose(escaped_text):
+    """Render an already-escaped, non-code segment: paragraphs, lists, breaks."""
+    blocks = []
+    block_type = None
+    block_lines = []
+
+    def flush():
+        if not block_lines:
+            return
+        if block_type == "ul":
+            items = "".join(
+                "<li>{}</li>".format(_render_inline(_UL_STRIP_RE.sub("", line, count=1)))
+                for line in block_lines
+            )
+            blocks.append('<ul style="{}">{}</ul>'.format(_BLOCK_STYLE, items))
+        elif block_type == "ol":
+            items = "".join(
+                "<li>{}</li>".format(_render_inline(_OL_STRIP_RE.sub("", line, count=1)))
+                for line in block_lines
+            )
+            blocks.append('<ol style="{}">{}</ol>'.format(_BLOCK_STYLE, items))
+        else:
+            content = "<br>".join(_render_inline(line) for line in block_lines)
+            blocks.append('<p style="{}">{}</p>'.format(_BLOCK_STYLE, content))
+
+    for raw_line in escaped_text.split("\n"):
+        line = raw_line.strip()
+        if line == "":
+            flush()
+            block_type = None
+            block_lines = []
+            continue
+        if _UL_RE.match(line):
+            line_type = "ul"
+        elif _OL_RE.match(line):
+            line_type = "ol"
+        else:
+            line_type = "p"
+        if line_type != block_type:
+            flush()
+            block_type = line_type
+            block_lines = []
+        block_lines.append(line)
+    flush()
+
+    return "".join(blocks)
+
+
+def _render_inline(escaped_line):
+    """Apply inline code and bold to an already-escaped line, skipping code spans."""
+    pieces = _INLINE_CODE_RE.split(escaped_line)
+    rendered = []
+    for index, piece in enumerate(pieces):
+        if index % 2 == 1:
+            rendered.append('<code style="{}">{}</code>'.format(_CODE_STYLE, piece[1:-1]))
+        else:
+            rendered.append(_BOLD_RE.sub(r"<strong>\1</strong>", piece))
+    return "".join(rendered)
 
 
 class ExplainErrorsExceptionReporter(ExceptionReporter):
@@ -37,7 +154,7 @@ class ExplainErrorsExceptionReporter(ExceptionReporter):
                 return html
 
             anchor_index = html.index(ANCHOR)
-            banner = BANNER_TEMPLATE.format(explanation=escape(explanation))
+            banner = BANNER_TEMPLATE.format(explanation=render_explanation_html(explanation))
             return html[:anchor_index] + banner + html[anchor_index:]
         except Exception:
             logger.warning(
