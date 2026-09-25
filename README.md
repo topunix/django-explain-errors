@@ -85,10 +85,10 @@ pip install django-explain-errors
 
 3. **Set up environment variables**:
 
-   - Create a `.env` file in your project's root directory and add your OpenAI API key. Alternatively, you can set the API key in `settings.py`:
+   - Create a `.env` file in your project's root directory and add your API key. Alternatively, you can set it in `settings.py`:
 
      ```plaintext
-     OPENAI_API_KEY=your_openai_api_key_here
+     OPENAI_API_KEY=your_api_key_here
      ```
 
    The API key is not required if you set `OPENAI_BASE_URL` to a local
@@ -132,12 +132,19 @@ python manage.py check --deploy --fail-level WARNING
 
    The middleware captures the error, sends it to the configured model for explanation, prints the explanation to stdout, and adds it as a banner on Django's debug page. By default (`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True`), exception handling then continues normally, so Django (or whatever else is watching, such as `runserver_plus` or Sentry, see Compatibility below) renders its usual response. The only change is the banner on Django's own debug page. Set `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE = False` to remove it, or `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False` to instead get a JSON `500` response containing the error message and the explanation.
 
+   In the terminal, the explanation is printed with the model that produced it:
+
+   ```
+   Error explanation (gpt-4o-mini):
+    The view raised a ValueError because ...
+   ```
+
 ## Async Support
 
 The middleware exposes both `sync_capable = True` and `async_capable = True`. At initialization it inspects `get_response` to decide whether it is part of a sync or async chain:
 
 - Under WSGI (for example `runserver` with sync views), requests flow through the synchronous handler.
-- Under ASGI (for example with async views), requests are awaited through the async handler. The blocking OpenAI call is offloaded with `asgiref.sync.sync_to_async` so the event loop is not blocked.
+- Under ASGI (for example with async views), requests are awaited through the async handler. The blocking model API call is offloaded with `asgiref.sync.sync_to_async` so the event loop is not blocked.
 
 No additional settings are needed. See Installation above for where to place the middleware in `MIDDLEWARE`.
 
@@ -185,7 +192,7 @@ preserve mode and with `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False`:
 | Django Debug Toolbar | Works — Django renders its debug page (with the explanation banner, unless `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE = False`), and Debug Toolbar injects into it. | Broken — the JSON 500 response has no HTML to inject into. |
 | Sentry, Rollbar | Work — the exception propagates and Django re-raises it, so `got_request_exception` fires. | Broken — returning a response ends exception handling before `got_request_exception` fires. |
 | Django REST Framework | Partial — only exceptions DRF does not already handle itself reach this middleware. | Partial, same reason. |
-| Silk and other profiling panels | Timings are inflated by the OpenAI call, since `process_exception` blocks the request path. | Same. |
+| Silk and other profiling panels | Timings are inflated by the model API call, since `process_exception` blocks the request path. | Same. |
 | CORS, GZip, WhiteNoise | No interaction. | No interaction. |
 | `runserver_plus` / Werkzeug debugger | Works — returning `None` re-raises the original exception, and `django-extensions` replaces Django's debug-page renderer with one that re-raises instead, so Werkzeug's WSGI wrapper catches it and shows the interactive debugger. | Broken — the JSON 500 response ends exception handling before it reaches `runserver_plus`'s exception hook, so the Werkzeug debugger never appears. |
 
@@ -209,7 +216,7 @@ developer is actually investigating.
 | `DEBUG` | Yes | The middleware is only active when `DEBUG=True`. When `False`, requests pass through untouched. |
 | `OPENAI_MODEL` | No | Model used for explanations. Defaults to `gpt-4o-mini`. |
 | `OPENAI_MAX_TOKENS` | No | Ceiling on tokens generated for the explanation, not a target — the system prompt itself asks for a concise answer. Defaults to `1000`; scales up automatically when `EXPLAIN_ERRORS_LANGUAGE` is set (see below), unless you set this explicitly, which always overrides the scaling. |
-| `OPENAI_TIMEOUT` | No | Request timeout in seconds for the OpenAI client. Defaults to `10`. |
+| `OPENAI_TIMEOUT` | No | Request timeout in seconds for model API calls. Defaults to `10`. |
 | `OPENAI_MAX_TRACEBACK_CHARS` | No | Total character budget for the traceback sent to the model. Application frames (your own code, as opposed to Django, the standard library, or installed packages) are always kept; library frames fill whatever budget remains, nearest the raise point first, with an `... N library frames omitted ...` line where frames are dropped. If the application frames alone exceed the budget, falls back to keeping the last N characters of the raw traceback. Defaults to `3000`. |
 | `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` | No | When `True` (the default), the middleware returns `None` (after printing the explanation to stdout, unless `EXPLAIN_ERRORS_PRINT_STDOUT = False`), so exception handling continues normally and Django renders its debug page (with the explanation banner, controlled by `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`). Set to `False` to instead return a JSON 500 response, which ends exception handling early (see Compatibility above). |
 | `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` | No | When `True` (the default), also injects the explanation as a banner into Django's debug page, in addition to stdout. Requires `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True` (the default); see Debug Page Injection above. |
@@ -350,7 +357,7 @@ python manage.py build_error_index
 
 This walks your project, chunks Python files by top-level function/class
 (and other text files by fixed-size line windows), embeds each chunk with
-the OpenAI embeddings API, and writes them to a local index file. Re-run it
+the configured endpoint's embeddings API, and writes them to a local index file. Re-run it
 whenever your source changes meaningfully. Indexing is not automatic.
 Rebuilding is idempotent: it builds into a temp file and atomically replaces
 the previous index.
@@ -370,15 +377,14 @@ EXPLAIN_ERRORS_RAG_ENABLED = True
 | `EXPLAIN_ERRORS_RAG_ENABLED` | `False` | Master switch for the RAG layer. |
 | `EXPLAIN_ERRORS_RAG_INDEX_PATH` | `<BASE_DIR>/.explain_errors_index.db` | Path to the local vector index file. |
 | `EXPLAIN_ERRORS_RAG_TOP_K` | `4` | Number of chunks retrieved and injected into the prompt. |
-| `EXPLAIN_ERRORS_RAG_EMBED_MODEL` | `"text-embedding-3-small"` | OpenAI embedding model used for indexing and retrieval. |
+| `EXPLAIN_ERRORS_RAG_EMBED_MODEL` | `"text-embedding-3-small"` | Embedding model used for indexing and retrieval. Must exist on the configured endpoint. |
 | `EXPLAIN_ERRORS_RAG_INCLUDE` | `None` (defaults to `BASE_DIR`) | List of directories to index. |
 | `EXPLAIN_ERRORS_RAG_EXCLUDE` | migrations, venvs, `node_modules`, static, media, `.git` | Directory names to skip while indexing. |
 | `EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS` | `6000` | Combined character budget for the traceback + retrieved source sections of the prompt. |
 
 Every chunk of source code and every retrieval query is passed through the
 same `sanitize_traceback()` redaction used for tracebacks, which strips
-patterns that look like secrets, tokens, and emails before anything is sent
-to OpenAI or written to the index. It's a pattern-based filter, not a
+patterns that look like secrets, tokens, and emails before anything is sent to the model API or written to the index. It's a pattern-based filter, not a
 guarantee: it catches recognizable secret shapes, not arbitrary sensitive
 data that doesn't match one.
 
@@ -520,5 +526,5 @@ Contributions are welcome! Please open an issue or submit a pull request for any
 ## Acknowledgements
 
 - [Django](https://www.djangoproject.com/)
-- [OpenAI](https://www.openai.com/)
+- [OpenAI Python SDK](https://github.com/openai/openai-python)
 - [python-dotenv](https://github.com/theskumar/python-dotenv)
