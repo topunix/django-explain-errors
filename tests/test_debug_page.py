@@ -10,7 +10,10 @@ from django.test import (
 )
 from django.views.debug import ExceptionReporter
 
-from explain_errors.debug_page import ExplainErrorsExceptionReporter
+from explain_errors.debug_page import (
+    ExplainErrorsExceptionReporter,
+    render_explanation_html,
+)
 
 
 class _RaisingBool:
@@ -220,6 +223,145 @@ class DebugPageRequestCycleTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 500)
         self.assertIn('id="explain-errors"', response.content.decode())
+
+
+class RenderExplanationHtmlTest(SimpleTestCase):
+    """Unit tests for the Markdown-subset renderer used by the banner."""
+
+    def test_inline_code(self):
+        html = render_explanation_html("Use `foo` here.")
+
+        self.assertIn("<code", html)
+        self.assertIn(">foo</code>", html)
+        self.assertNotIn("`", html)
+
+    def test_bold(self):
+        html = render_explanation_html("This is **bold** text.")
+
+        self.assertIn("<strong>bold</strong>", html)
+
+    def test_fenced_code_block_with_language_tag(self):
+        html = render_explanation_html("```python\nx = 1\n```")
+
+        self.assertIn("<pre", html)
+        self.assertIn("<code>x = 1</code>", html)
+        self.assertNotIn("python", html)
+
+    def test_fenced_code_block_without_language_tag(self):
+        html = render_explanation_html("```\ny = 2\n```")
+
+        self.assertIn("<pre", html)
+        self.assertIn("<code>y = 2</code>", html)
+
+    def test_unordered_list(self):
+        html = render_explanation_html("- one\n- two")
+
+        self.assertIn("<ul", html)
+        self.assertEqual(html.count("<li "), 2)
+        self.assertIn(">one</li>", html)
+        self.assertIn(">two</li>", html)
+
+    def test_ordered_list(self):
+        html = render_explanation_html("1. one\n2. two")
+
+        self.assertIn("<ol", html)
+        self.assertEqual(html.count("<li "), 2)
+        self.assertIn(">one</li>", html)
+        self.assertIn(">two</li>", html)
+
+    def test_paragraphs_and_single_line_breaks(self):
+        html = render_explanation_html("line1\nline2\n\npara2")
+
+        self.assertIn("line1<br>line2", html)
+        self.assertEqual(html.count("<p"), 2)
+
+    def test_script_tag_in_prose_is_escaped(self):
+        html = render_explanation_html("<script>alert(1)</script>")
+
+        self.assertNotIn("<script>alert(1)</script>", html)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
+
+    def test_script_tag_in_inline_code_is_escaped(self):
+        html = render_explanation_html("Run `<script>alert(1)</script>` now.")
+
+        self.assertNotIn("<script>alert(1)</script>", html)
+        self.assertIn("<code", html)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
+
+    def test_script_tag_in_fenced_code_is_escaped(self):
+        html = render_explanation_html("```\n<script>alert(1)</script>\n```")
+
+        self.assertNotIn("<script>alert(1)</script>", html)
+        self.assertIn("<pre", html)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
+
+    def test_bold_and_dash_inside_code_are_not_transformed(self):
+        html = render_explanation_html("Use `a**b**c` here.")
+
+        self.assertNotIn("<strong>", html)
+        self.assertIn("a**b**c", html)
+
+    def test_dash_inside_fenced_code_is_not_a_list(self):
+        html = render_explanation_html("```\n- not a list\n```")
+
+        self.assertNotIn("<ul", html)
+        self.assertIn("- not a list", html)
+
+    def test_unclosed_fence_renders_remainder_as_code(self):
+        html = render_explanation_html(
+            "before\n```python\ntitle = 1\n- check the field"
+        )
+
+        self.assertIn("<p", html)
+        self.assertIn("before", html)
+        self.assertIn("<pre", html)
+        self.assertIn("check the field", html)
+        self.assertNotIn("<ul", html)
+
+    def test_markdown_link_stays_literal(self):
+        html = render_explanation_html("[text](url)")
+
+        self.assertNotIn("<a ", html)
+        self.assertIn("[text](url)", html)
+
+    def test_raising_transform_falls_back_to_escaped_plain_text_and_logs(self):
+        with patch(
+            "explain_errors.debug_page._render", side_effect=RuntimeError("boom")
+        ):
+            with self.assertLogs("explain_errors", level="WARNING"):
+                html = render_explanation_html("<script>alert(1)</script>")
+
+        self.assertIn("white-space: pre-wrap", html)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
+        self.assertNotIn("<script>alert(1)</script>", html)
+
+
+@override_settings(ROOT_URLCONF="tests.urls_debug_page")
+class ExplainErrorsExceptionReporterMarkdownTest(SimpleTestCase):
+    """Reporter-level check that the banner renders Markdown, not raw text."""
+
+    def setUp(self):
+        self.factory = RequestFactory()
+        patcher = patch(
+            "django.views.debug.timezone.now",
+            return_value=datetime.datetime(2026, 1, 1, tzinfo=datetime.timezone.utc),
+        )
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_banner_contains_code_tag_for_backticked_name(self):
+        request = self.factory.get("/")
+        reporter = _build_reporter(
+            ExplainErrorsExceptionReporter,
+            request,
+            _exc_info(),
+            explanation="The view `create_post` failed.",
+        )
+
+        html = reporter.get_traceback_html()
+
+        self.assertIn("<code", html)
+        self.assertIn("create_post", html)
 
 
 class PlainReporter(ExceptionReporter):
