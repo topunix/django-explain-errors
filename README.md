@@ -25,6 +25,11 @@ the matching path, so no extra configuration is required for either server
 type. Tracebacks are sanitized before leaving the process, and API calls are
 rate limited.
 
+![Django debug page with the explanation banner under the exception headline](https://raw.githubusercontent.com/topunix/django-explain-errors/main/docs/images/debug-page-banner.png)
+
+*Real `gpt-4o-mini` output with RAG enabled, recorded by the eval harness
+on its `missing_fk` fixture.*
+
 ## Scope
 
 This package explains errors for a person, not for a coding agent to consume
