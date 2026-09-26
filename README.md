@@ -170,8 +170,9 @@ when all of the following hold:
 - an explanation was actually produced (not throttled, and the API call succeeded)
 
 The banner appears only on the HTML debug page, styled inline (bordered box, light
-background) so it reads on Django's page. The explanation is HTML-escaped and rendered in
-a scrollable block; it is never marked safe.
+background) so it reads on Django's page. The explanation is HTML-escaped first, then a small
+Markdown subset (inline code, code blocks, bold, lists) is rendered as HTML. Nothing from the
+model is ever marked safe.
 
 **Fails open.** Any problem building or inserting the banner (a missing request, an
 unexpected debug page layout, anything else) logs one warning and leaves Django's normal

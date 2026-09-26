@@ -10,7 +10,7 @@ BANNER_TEMPLATE = """
 <section id="explain-errors" style="border: 1px solid #ccc; background: #fdfdf0; \
 font-family: sans-serif; padding: 10px 15px; margin: 10px 0;">
   <h3 style="margin: 0 0 8px 0;">Explanation (django-explain-errors)</h3>
-  <div style="max-height: 16em; overflow-y: auto;">{explanation}</div>
+  <div>{explanation}</div>
 </section>
 """
 
