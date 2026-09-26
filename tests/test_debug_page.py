@@ -1,4 +1,5 @@
 import datetime
+import html as html_module
 from unittest.mock import MagicMock, patch
 
 from django.test import (
@@ -356,6 +357,67 @@ class RenderExplanationHtmlTest(SimpleTestCase):
 
         self.assertNotIn("<a ", html)
         self.assertIn("[text](url)", html)
+
+    def test_single_code_block_emits_one_copy_button_and_script(self):
+        html = render_explanation_html("```\nx = 1\n```")
+
+        self.assertEqual(html.count("<button"), 1)
+        self.assertEqual(html.count("<script>"), 1)
+
+    def test_multiple_code_blocks_emit_one_button_each_and_exactly_one_script(self):
+        html = render_explanation_html("```\nx = 1\n```\ntext\n```\ny = 2\n```")
+
+        self.assertEqual(html.count("<button"), 2)
+        self.assertEqual(html.count("<script>"), 1)
+
+    def test_copy_button_has_type_button_and_aria_label(self):
+        html = render_explanation_html("```\nx = 1\n```")
+
+        self.assertIn('type="button"', html)
+        self.assertIn('aria-label="Copy code"', html)
+
+    def test_no_code_blocks_emit_no_button_and_no_script(self):
+        html = render_explanation_html("Just prose, no code here.")
+
+        self.assertNotIn("data-copy", html)
+        self.assertNotIn("explain-errors-copy-btn", html)
+        self.assertNotIn("<script>", html)
+
+    def test_copy_source_round_trips_html_special_characters(self):
+        raw_code = """<script>alert("x & 'y'")</script>"""
+        html = render_explanation_html("```\n{}\n```".format(raw_code))
+
+        start = html.index("<code dir=\"ltr\">") + len('<code dir="ltr">')
+        end = html.index("</code>", start)
+        escaped_code = html[start:end]
+
+        self.assertEqual(html_module.unescape(escaped_code), raw_code)
+
+    def test_empty_code_block_emits_pre_without_button(self):
+        html = render_explanation_html("```\n\n```")
+
+        self.assertIn("<pre", html)
+        self.assertNotIn("<button", html)
+        self.assertNotIn("explain-errors-code-wrapper", html)
+
+    def test_whitespace_only_code_block_emits_pre_without_button(self):
+        html = render_explanation_html("```\n   \n```")
+
+        self.assertIn("<pre", html)
+        self.assertNotIn("<button", html)
+        self.assertNotIn("explain-errors-code-wrapper", html)
+
+    def test_all_empty_code_blocks_emit_no_script(self):
+        html = render_explanation_html("```\n\n```\ntext\n```\n  \n```")
+
+        self.assertNotIn("<button", html)
+        self.assertNotIn("<script>", html)
+
+    def test_mix_of_empty_and_nonempty_blocks_emits_button_only_for_nonempty(self):
+        html = render_explanation_html("```\n\n```\ntext\n```\nx = 1\n```")
+
+        self.assertEqual(html.count("<button"), 1)
+        self.assertEqual(html.count("<script>"), 1)
 
     def test_raising_transform_falls_back_to_escaped_plain_text_and_logs(self):
         with patch(

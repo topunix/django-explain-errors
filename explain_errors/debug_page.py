@@ -21,10 +21,78 @@ _PRE_STYLE = (
     "font-family: monospace; background: #eee; padding: 8px; "
     "overflow-x: auto; white-space: pre-wrap; margin: 4px 0;"
 )
+_PRE_WITH_BUTTON_STYLE = (
+    "font-family: monospace; background: #eee; padding: 8px 60px 8px 8px; "
+    "overflow-x: auto; white-space: pre-wrap; margin: 0;"
+)
 _P_STYLE = "margin: 6px 0;"
 _UL_STYLE = "margin: 6px 0; padding-inline-start: 1.5em; list-style: disc;"
 _OL_STYLE = "margin: 6px 0; padding-inline-start: 1.5em; list-style: decimal;"
 _LI_STYLE = "margin: 2px 0;"
+_CODE_WRAPPER_STYLE = "position: relative; margin: 4px 0;"
+_COPY_BUTTON_STYLE = (
+    "position: absolute; top: 4px; right: 4px; font-family: sans-serif; "
+    "font-size: 11px; line-height: 1; padding: 3px 7px; cursor: pointer; "
+    "background: #fff; border: 1px solid #999; border-radius: 3px; color: #333;"
+)
+_COPY_BUTTON_CLASS = "explain-errors-copy-btn"
+_CODE_WRAPPER_CLASS = "explain-errors-code-wrapper"
+
+_COPY_SCRIPT = """
+<script>
+(function () {{
+  var container = document.currentScript && document.currentScript.closest("#explain-errors");
+  if (!container) {{
+    return;
+  }}
+  container.addEventListener("click", function (event) {{
+    var btn = event.target.closest("button[data-copy]");
+    if (!btn) {{
+      return;
+    }}
+    var wrapper = btn.closest(".{wrapper_class}");
+    var code = wrapper && wrapper.querySelector("code");
+    if (!code) {{
+      return;
+    }}
+    var text = code.textContent;
+    var showCopied = function () {{
+      if (btn._explainErrorsTimer) {{
+        clearTimeout(btn._explainErrorsTimer);
+      }}
+      btn.textContent = "Copied";
+      btn._explainErrorsTimer = setTimeout(function () {{
+        btn.textContent = "Copy";
+        btn._explainErrorsTimer = null;
+      }}, 1500);
+    }};
+    var fallbackCopy = function () {{
+      try {{
+        var range = document.createRange();
+        range.selectNodeContents(code);
+        var selection = window.getSelection();
+        selection.removeAllRanges();
+        selection.addRange(range);
+        var ok = document.execCommand("copy");
+        selection.removeAllRanges();
+        if (ok) {{
+          showCopied();
+        }}
+      }} catch (err) {{
+        /* both copy paths failed; do nothing */
+      }}
+    }};
+    if (navigator.clipboard && navigator.clipboard.writeText) {{
+      navigator.clipboard.writeText(text).then(showCopied, fallbackCopy);
+    }} else {{
+      fallbackCopy();
+    }}
+  }});
+}})();
+</script>
+""".format(
+    wrapper_class=_CODE_WRAPPER_CLASS
+)
 
 _LANG_TAG_RE = re.compile(r"^[A-Za-z0-9_+-]*$")
 _INLINE_CODE_RE = re.compile(r"(`[^`\n]*`)")
@@ -55,12 +123,18 @@ def render_explanation_html(text):
 def _render(text):
     parts = text.split("```")
     rendered = []
+    has_copy_button = False
     for index, part in enumerate(parts):
         if index % 2 == 1:
-            rendered.append(_render_code_block(part))
+            block_html, has_button = _render_code_block(part)
+            rendered.append(block_html)
+            has_copy_button = has_copy_button or has_button
         else:
             rendered.append(_render_prose(escape(part)))
-    return "".join(rendered)
+    html = "".join(rendered)
+    if has_copy_button:
+        html += _COPY_SCRIPT
+    return html
 
 
 def _render_code_block(segment):
@@ -71,9 +145,24 @@ def _render_code_block(segment):
             code = rest
     if code.endswith("\n"):
         code = code[:-1]
-    return '<pre dir="ltr" style="{style}"><code dir="ltr">{code}</code></pre>'.format(
-        style=_PRE_STYLE, code=escape(code)
-    )
+    if not code.strip():
+        return (
+            '<pre dir="ltr" style="{pre_style}"><code dir="ltr">{code}</code></pre>'
+        ).format(pre_style=_PRE_STYLE, code=escape(code)), False
+    return (
+        '<div class="{wrapper_class}" style="{wrapper_style}">'
+        '<button type="button" class="{btn_class}" data-copy '
+        'aria-label="Copy code" style="{btn_style}">Copy</button>'
+        '<pre dir="ltr" style="{pre_style}"><code dir="ltr">{code}</code></pre>'
+        "</div>"
+    ).format(
+        wrapper_class=_CODE_WRAPPER_CLASS,
+        wrapper_style=_CODE_WRAPPER_STYLE,
+        btn_class=_COPY_BUTTON_CLASS,
+        btn_style=_COPY_BUTTON_STYLE,
+        pre_style=_PRE_WITH_BUTTON_STYLE,
+        code=escape(code),
+    ), True
 
 
 def _render_prose(escaped_text):
