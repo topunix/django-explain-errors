@@ -154,6 +154,31 @@ Sequencing below follows from that.
   for judge-provider rate limits.
   Verify: `--judge-concurrency` appears in `evals/run.py` on `main`.
 
+- **eval-fix-validity**: a second eval track that asks whether the suggested fix
+  works, not just whether the explanation reads better. For each fixture, the
+  harness (not the package) turns the explanation's suggested fix into a patch,
+  applies it to a temporary copy of `evals/fixture_app/`, re-hits the fixture URL,
+  and records the result. Report four rates per condition (RAG-on and RAG-off):
+  explained (diagnosis matches `expected_cause`), fix proposed, patch applied
+  cleanly, verified.
+  The pass condition is the gap to close first. Fixtures are URLs, not tests, and
+  "no 500 on re-request" is too weak: a patch that wraps the view in
+  `try/except` passes it. Each fixture needs its own oracle (expected status
+  code plus a response assertion, or a small test per fixture) written before any
+  patch is generated.
+  Why it matters: a passing oracle is ground truth that no LLM judge can
+  misread, which answers the judge limitation recorded in `evals/README.md`
+  (correct source-derived details scored as fabrication). It also tests whether
+  RAG's measured value (specificity) carries through to correct fixes, or only
+  to more specific prose.
+  Scope: harness only. A fix-and-verify mode inside the package (patch, apply in
+  a worktree, rerun tests) is out of scope. It overlaps coding agents, which
+  already do this loop, it assumes a failing test exists for a live request, and
+  executing generated code conflicts with the package's human-reader positioning.
+  Sequencing: after the public write-up of the existing harness results, so this
+  can be a second write-up rather than competing with the first.
+  Verify: `evals/README.md` on `main` reports a verified-fix rate.
+
 ## Rejected (recorded so it does not resurface)
 - **Editor extension or MCP server for IDE consumption.** VS Code, PyCharm, and Zed all have
   integrated terminals, so `runserver` output is already inside the editor. The browser, not
