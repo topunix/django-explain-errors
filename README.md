@@ -1,13 +1,13 @@
 # Django Explain Errors Middleware
 
-This Django middleware captures unhandled errors and exceptions, sends them
-to a language model for explanation, and, when debug mode is enabled, shows
-the explanation on Django's debug page directly under the exception
-headline, as well as printing it to stdout. It works with the OpenAI API
-out of the box, with Anthropic's Claude models through Anthropic's
+When debug mode is on, this Django middleware sends each unhandled exception
+to a language model and shows its explanation of what went wrong and how to
+fix it on Django's debug page, directly under the exception headline. The
+explanation is also printed to stdout. The middleware works with the OpenAI
+API out of the box, with Anthropic's Claude models through Anthropic's
 OpenAI-compatible endpoint, and with any other OpenAI-compatible endpoint
-(Ollama, LM Studio, Azure, or a corporate gateway) by setting a base URL,
-so explanations can run entirely on a local model if you prefer not to send
+(Ollama, LM Studio, Azure, or a corporate gateway) by setting a base URL, so
+explanations can run entirely on a local model if you prefer not to send
 code off your machine.
 
 Enabling RAG is strongly recommended. With it, the middleware retrieves the
@@ -48,6 +48,8 @@ Local development only. It requires `DEBUG = True` and is inert otherwise.
 - Captures Django errors and exceptions
 - Shows the explanation on Django's debug page, directly under the
   exception headline (`EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`, on by default)
+- Copy button on each code block in the explanation, so a suggested fix
+  copies in one click
 - Prints the explanation to stdout, for terminal workflows and logs
   (`EXPLAIN_ERRORS_PRINT_STDOUT`, on by default)
 - Optional JSON 500 response instead of the debug page
@@ -178,6 +180,10 @@ The banner appears only on the HTML debug page, styled inline (bordered box, lig
 background) so it reads on Django's page. The explanation is HTML-escaped first, then a small
 Markdown subset (inline code, code blocks, bold, lists) is rendered as HTML. Nothing from the
 model is ever marked safe.
+
+Each fenced code block gets a "Copy" button that copies the exact code (via
+`navigator.clipboard` on secure contexts such as `localhost`, or a text-selection fallback
+otherwise, for example when `runserver` is reached by IP over plain HTTP).
 
 **Fails open.** Any problem building or inserting the banner (a missing request, an
 unexpected debug page layout, anything else) logs one warning and leaves Django's normal
