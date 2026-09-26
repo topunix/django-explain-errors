@@ -105,6 +105,55 @@ Sequencing below follows from that.
   what makes fully-local operation coherent.
   Verify: an `extras_require` entry naming sentence-transformers exists in `setup.py`.
 
+- **anthropic-rag-embeddings**: check whether RAG works for Anthropic users.
+  The indexer and retriever use the same client and `OPENAI_BASE_URL` as the
+  chat call, and Anthropic's OpenAI-compatible API may have no embeddings
+  endpoint. If so, `build_error_index` fails for Anthropic users and the
+  README's RAG recommendation does not apply to them. Check against the live
+  API first. If embeddings are unsupported, either document it in the README
+  (Anthropic section and RAG section), or add separate embedding settings
+  (for example `EXPLAIN_ERRORS_RAG_EMBED_BASE_URL` and a matching key) so
+  chat and embeddings can use different providers. Local embeddings (above)
+  would also cover this case.
+  Verify: the README's Anthropic section states whether RAG works with it.
+
+- **debug-toolbar-with-banner**: the Compatibility table's Django Debug
+  Toolbar row was verified empirically before debug page injection existed.
+  Re-verify the toolbar with the banner present, on Django 4.2 and the
+  newest supported version, and update the row and the "verified
+  empirically" sentence to say so.
+  Verify: the Compatibility section states the Debug Toolbar row was
+  verified with the explanation banner present.
+
+- **README restructure**: move the "Debug page injection" section up, next to
+  Usage, and trim Usage step 2, which repeats it; reduce "Async Support" to
+  one line in Features; group the Configuration table by purpose (provider,
+  output, limits, redaction, language); shorten the tokenizer detail in
+  "Explanation language"; add a Requirements line (Python 3.9+, Django 4.2+);
+  give Contributing the dev setup and test command; remove changelog
+  wording ("no longer needs to be last", the "Upgrading" paragraph in Debug
+  page injection). Also re-record the "Before / after" RAG example on the
+  current version, since its traceback-only side predates 0.7.0, and drop
+  the note that says so. Coordinate with README positioning rewrite in the
+  sequenced queue: do this first, or fold both into one PR, so the README
+  is not rewritten twice.
+  Verify: README.md has a Requirements line and the "Debug page injection"
+  section appears before "Async Support".
+
+- **eval-harness-concurrent-judging**: run the judge phase of `evals/run.py`
+  concurrently (thread pool, `--judge-concurrency N`, default around 8, N=1
+  reproducing today's behavior). Draw each comparison's A/B position from
+  the existing rng up front, in the current order, so position
+  randomization is unchanged, and return judgments in the current order.
+  Keep the generator phase sequential: `_capture_call` patches
+  `explain_errors.middleware.sanitize_traceback` and attaches a handler to
+  the shared `explain_errors` logger, so concurrent calls would mix up
+  captured tracebacks and token usage, and reported generator latency (a
+  number the README cites) would include contention. Record wall-clock time
+  per phase in the results file so the gain is measured, not assumed. Watch
+  for judge-provider rate limits.
+  Verify: `--judge-concurrency` appears in `evals/run.py` on `main`.
+
 ## Rejected (recorded so it does not resurface)
 - **Editor extension or MCP server for IDE consumption.** VS Code, PyCharm, and Zed all have
   integrated terminals, so `runserver` output is already inside the editor. The browser, not
