@@ -154,6 +154,20 @@ Sequencing below follows from that.
   for judge-provider rate limits.
   Verify: `--judge-concurrency` appears in `evals/run.py` on `main`.
 
+- **copy-fix-button**: add a "Copy" button to each fenced code block in the
+  debug page banner, so a suggested fix can be copied without selecting it
+  by hand. Read-only: no server endpoint, nothing written to disk, the
+  developer still reads and applies the change. Implement as a small inline
+  script or handler in the banner markup. `navigator.clipboard` only exists
+  in secure contexts, so it works on `localhost` but not when the dev server
+  is reached by IP (for example `runserver 0.0.0.0` from another machine);
+  fall back to selecting the block's text and `document.execCommand("copy")`,
+  and if both fail, do nothing rather than show an error. Copy the code
+  exactly as the model wrote it, not the rendered HTML. Small, slot in
+  anywhere.
+  Verify: `explain_errors/debug_page.py` on `main` emits a copy button for
+  fenced code blocks.
+
 ## Rejected (recorded so it does not resurface)
 - **Editor extension or MCP server for IDE consumption.** VS Code, PyCharm, and Zed all have
   integrated terminals, so `runserver` output is already inside the editor. The browser, not
