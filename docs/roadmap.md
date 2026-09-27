@@ -53,6 +53,17 @@ Sequencing below follows from that.
      ahead of the rest of the positioning rewrite.
      Verify: `README.md` on `main` has a `## Production Safety` heading.
 
+3. **editor-open-links**: in the injected debug page, render each traceback frame (and each
+   source file cited by retrieval) as an "open in editor" link to that file and line. Use a
+   configurable URL template setting, for example
+   `EXPLAIN_ERRORS_EDITOR_URL = "vscode://file/{path}:{line}"`, following the pattern used by
+   Werkzeug and django-extensions. The setting defaults to off, and links only render when
+   DEBUG is on. A small addition that helps the developer navigate from the explanation to
+   their own code, it fits the "learning aid grounded in user code" positioning and needs no
+   editor extension.
+   Sequencing: after the eval harness dev.to article.
+   Verify: `grep -rn "EXPLAIN_ERRORS_EDITOR_URL" explain_errors/` on `main` returns a match.
+
 ## Conditional or unscheduled
 
 - **Retrieval anchoring**: the eval harness showed RAG-on can anchor on an adjacent
@@ -188,6 +199,14 @@ Sequencing below follows from that.
   injection addresses the same problem without a second artifact. The only thing an extension
   would uniquely provide is a gutter marker on the failing `file:line`. Revisit only if that
   specific capability is repeatedly requested.
+- **"Insert at cursor" and "open snippet in editor."** Both require a VS Code extension,
+  which was already rejected above. The browser debug page is where developers look when a
+  500 fires.
+- **Apply fix to exact lines.** Also rejected. It moves the package into coding-agent
+  territory, and it conflicts with the decision to keep fix validation as a harness-only eval
+  track (`eval-fix-validity`). The eval showed retrieval can anchor on an adjacent chunk
+  (`missing_post_key` pointed the fix at a template, not the view), so an auto-apply would
+  edit the wrong file.
 - **Dynamic `max_tokens` expansion at runtime.** The cap is a ceiling, not an allocation, and
   billing follows tokens generated, so a generous ceiling is already dynamic and there is
   nothing to build. All three shapes are worse than raising the default: retrying on
