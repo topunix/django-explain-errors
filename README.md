@@ -1,34 +1,29 @@
-# Django Explain Errors Middleware
+# Django Explain Errors
 
-When debug mode is on, this Django middleware sends each unhandled exception
-to a language model and shows its explanation of what went wrong and how to
-fix it on Django's debug page, directly under the exception headline. The
-explanation is also printed to stdout. The middleware works with the OpenAI
-API out of the box, with Anthropic's Claude models through Anthropic's
-OpenAI-compatible endpoint, and with any other OpenAI-compatible endpoint
-(Ollama, LM Studio, Azure, or a corporate gateway) by setting a base URL, so
-explanations can run entirely on a local model if you prefer not to send
-code off your machine.
+Explains Django exceptions on the debug page, pointing at the real fix in your own source code.
 
-Enabling RAG is strongly recommended. With it, the middleware retrieves the
-relevant parts of your own project source from a local vector index, so
-explanations name the actual file and function that failed instead of
-guessing. In the package's eval harness, RAG-grounded explanations won 35
-of 43 blind comparisons, with the gap concentrated in pointing at the right
-fix location and not inventing details (see "Does RAG actually help?"
-below). It is off by default because it needs an optional extra and a
-one-time index build.
+<p align="center">
+  <a href="https://pypi.org/project/django-explain-errors/"><img src="https://img.shields.io/pypi/v/django-explain-errors" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/django-explain-errors/"><img src="https://img.shields.io/pypi/pyversions/django-explain-errors" alt="Python versions"></a>
+  <a href="https://github.com/topunix/django-explain-errors/actions/workflows/test.yml"><img src="https://github.com/topunix/django-explain-errors/actions/workflows/test.yml/badge.svg?branch=main" alt="Tests"></a>
+  <a href="https://github.com/topunix/django-explain-errors/blob/main/LICENSE"><img src="https://img.shields.io/pypi/l/django-explain-errors" alt="License"></a>
+</p>
 
-The middleware supports both synchronous (WSGI) and asynchronous (ASGI)
-views. It auto-detects the view chain at startup and routes requests through
-the matching path, so no extra configuration is required for either server
-type. Tracebacks are sanitized before leaving the process, and API calls are
-rate limited.
+<p align="center">
+  <img src="https://raw.githubusercontent.com/topunix/django-explain-errors/main/docs/images/debug-page-banner.png" width="800"
+       alt="Django debug page with the explanation banner under the exception headline">
+</p>
 
-![Django debug page with the explanation banner under the exception headline](https://raw.githubusercontent.com/topunix/django-explain-errors/main/docs/images/debug-page-banner.png)
+*The traceback held only Django and SQLite internals. With RAG enabled, the explanation names the
+failing function (`clone_latest_post`) and gives the one-line fix. Real `gpt-4o-mini` output from
+the eval harness.*
 
-*Real `gpt-4o-mini` output with RAG enabled, recorded by the eval harness
-on its `missing_fk` fixture.*
+- Appears on Django's debug page under the exception headline, and in stdout
+- Optional RAG over your project, so explanations name the actual file and function instead of guessing ([measured in the eval harness](#does-rag-actually-help))
+- Explanations in your language via `EXPLAIN_ERRORS_LANGUAGE`, with code and identifiers kept in English
+- Works with OpenAI, Claude, or any OpenAI-compatible endpoint, including local models via Ollama
+- Sync and async views, traceback redaction, rate limiting
+- Local development only: requires `DEBUG = True`
 
 ## Scope
 
@@ -54,8 +49,9 @@ Local development only. It requires `DEBUG = True` and is inert otherwise.
   (`EXPLAIN_ERRORS_PRINT_STDOUT`, on by default)
 - Optional JSON 500 response instead of the debug page
   (`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False`)
-- Explains errors using OpenAI, Anthropic's Claude models, or any other
-  OpenAI-compatible endpoint (Ollama, LM Studio, Azure, gateways) via `OPENAI_BASE_URL`
+- Explains errors using OpenAI out of the box, Anthropic's Claude models, or any other
+  OpenAI-compatible endpoint (Ollama, LM Studio, Azure, gateways) via `OPENAI_BASE_URL`,
+  including fully local models, so no code has to leave your machine
 - Codebase-aware explanations via RAG over a local sqlite-vec index
   (recommended; see "Codebase-aware explanations" below)
 - Explanations in your language via `EXPLAIN_ERRORS_LANGUAGE`, with exception names,
