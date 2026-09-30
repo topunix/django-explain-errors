@@ -25,7 +25,59 @@ Sequencing below follows from that.
 
 ## Sequenced queue
 
-1. **django-docs-links**: cross-reference explanations to official Django documentation.
+1. **readme-intro-rewrite**: put a legible screenshot first and shorten the README intro.
+   Today the intro is three dense paragraphs before any visual, so the screenshot lands
+   below the first screen. `docs/images/debug-page-banner.png` is 2400px wide with
+   full-width text lines. GitHub renders a README at about 830px wide, so body text shows
+   at about 11px and code at about 10px. The caption does not say what the image
+   demonstrates: the traceback held only Django and SQLite internals, yet the explanation
+   named the failing function.
+   Scope:
+   1. Re-capture the screenshot with Playwright at a 900 to 960px viewport,
+      deviceScaleFactor 2, cropped to the exception headline plus the explanation banner.
+      Use real output from the eval harness missing_fk fixture, as the current image does.
+      Embed at width="800".
+   2. Replace the intro (everything above "## Scope") with the block below.
+   3. Fold the removed intro prose (provider list, async detail, eval numbers) into the
+      existing Features, Scope, and RAG sections, removing duplication between the intro
+      and Features.
+   4. Optional: badges (PyPI version, Python versions, Django versions, CI) between the
+      tagline and the image.
+   Notes:
+   - Keep eval figures out of the intro. They change with every harness run, so they live
+     only in "Does RAG actually help?" and `evals/README.md`. The intro links there instead.
+   - Tagline wording is deliberate: no "plain English", because `EXPLAIN_ERRORS_LANGUAGE`
+     supports other languages.
+   - README changes must land in the same branch as any version bump, before tagging (PyPI
+     metadata is immutable per version).
+   Target intro:
+
+   ```markdown
+   # Django Explain Errors
+
+   Explains Django exceptions on the debug page, pointing at the real fix in your own source code.
+
+   <p align="center">
+     <img src="docs/images/debug-page-banner.png" width="800"
+          alt="Django debug page with the explanation banner under the exception headline">
+   </p>
+
+   *The traceback held only Django and SQLite internals. With RAG enabled, the explanation names the
+   failing function (`clone_latest_post`) and gives the one-line fix. Real `gpt-4o-mini` output from
+   the eval harness.*
+
+   - Appears on Django's debug page under the exception headline, and in stdout
+   - Optional RAG over your project, so explanations name the actual file and function instead of guessing ([measured in the eval harness](#does-rag-actually-help))
+   - Explanations in your language via `EXPLAIN_ERRORS_LANGUAGE`, with code and identifiers kept in English
+   - Works with OpenAI, Claude, or any OpenAI-compatible endpoint, including local models via Ollama
+   - Sync and async views, traceback redaction, rate limiting
+   - Local development only: requires `DEBUG = True`
+   ```
+
+   Verify: `README.md` on `main` starts with the tagline above, and the image renders
+   legibly at GitHub's README width.
+
+2. **django-docs-links**: cross-reference explanations to official Django documentation.
    Ship the cheap version first: a static map of exception type plus context to a docs
    anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
    generated prose is not, which matters most for the learning audience and shrinks the
@@ -41,7 +93,7 @@ Sequencing below follows from that.
      404 or silently fall back.
    Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
 
-2. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
+3. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
    backed by shipped behavior. Not before. The README documents shipped behavior; anything
    earlier is a promise that has to be kept.
    Verify: the README lead paragraph describes a grounded Django learning aid rather than an
@@ -53,7 +105,7 @@ Sequencing below follows from that.
      ahead of the rest of the positioning rewrite.
      Verify: `README.md` on `main` has a `## Production Safety` heading.
 
-3. **editor-open-links**: in the injected debug page, render each traceback frame (and each
+4. **editor-open-links**: in the injected debug page, render each traceback frame (and each
    source file cited by retrieval) as an "open in editor" link to that file and line. Use a
    configurable URL template setting, for example
    `EXPLAIN_ERRORS_EDITOR_URL = "vscode://file/{path}:{line}"`, following the pattern used by
