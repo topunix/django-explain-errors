@@ -82,7 +82,7 @@ in the same PR that ships it.
    the stdout print of the explanation itself. The OpenAI-failure message
    always prints. Debug page injection and the JSON 500 response are
    unaffected.)
-RAG settings (all optional, see docs/rag-design.md):
+RAG settings (all optional):
 - `EXPLAIN_ERRORS_RAG_ENABLED` (default False)
 - `EXPLAIN_ERRORS_RAG_INDEX_PATH`, `EXPLAIN_ERRORS_RAG_TOP_K`,
   `EXPLAIN_ERRORS_RAG_EMBED_MODEL`, `EXPLAIN_ERRORS_RAG_INCLUDE`,
@@ -127,8 +127,7 @@ RAG settings (all optional, see docs/rag-design.md):
 Previously an open question (single-explanation-per-worker flag with
 undecided scope). Resolved 2026-07-17: removed in favor of
 `SlidingWindowThrottle` — intended behavior is "limit API spend," not
-"explain exactly one error per worker lifetime." See
-`docs/hardening-design.md.` for the full rationale.
+"explain exactly one error per worker lifetime."
 
 ## Style
 

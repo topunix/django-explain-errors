@@ -290,8 +290,6 @@ Fold each into whichever branch already touches the relevant file.
   anyone configuring logging. One-line fix, folds into whichever branch next touches
   `sanitize.py`.
   Verify: `sanitize.py` uses `logging` rather than `print` for the invalid-pattern case.
-- `docs/hardening-design.md.` has a trailing dot in the filename.
-  Verify: no file with a trailing dot exists under `docs/` on `main`.
 - `docs/design.md` does not exist on `main`. It was written in a prior session and never
   committed. Its settings table was flagged as unverified against implementation.
   Verify: `docs/design.md` exists on `main` and its settings table matches the settings
