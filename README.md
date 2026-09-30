@@ -36,8 +36,6 @@ If a coding agent is doing the debugging, it does not need this. Agents read tra
 and tools that expose live runtime state (debugger-over-MCP servers, `mcp-django`) serve that case
 better. This package is not trying to compete there.
 
-Local development only. It requires `DEBUG = True` and is inert otherwise.
-
 ## Features
 
 - Captures Django errors and exceptions
