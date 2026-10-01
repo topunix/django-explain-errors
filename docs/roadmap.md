@@ -68,10 +68,33 @@ Sequencing below follows from that.
 
 - **Retrieval anchoring**: the eval harness showed RAG-on can anchor on an adjacent
   retrieved chunk instead of the one that matters. missing_post_key redirected the fix
-  to a retrieved template instead of the view. Candidates: lower
-  `EXPLAIN_ERRORS_RAG_TOP_K`, or tell the model which retrieved chunk contains the
-  failing frame. Test with the harness before and after.
-  Verify: a harness run recorded in evals/README.md compares the change.
+  to a retrieved template instead of the view.
+  Root cause (code read, Oct 2026): retrieval is vector similarity only. The innermost
+  project frame's file and line shape the query text but are never matched against the
+  stored `file_path`, `start_line` and `end_line`, so the chunk containing the failing
+  line is not guaranteed to be retrieved, and the one-chunk-per-file dedup can drop it.
+  Preferred fix: hybrid retrieval. Look up the chunk whose stored range contains the
+  innermost project frame's line, by exact file and line match with no embedding call,
+  and pin it ahead of the KNN results, exempt from the by-file dedup. KNN results still
+  follow, since the cause is often in related code the traceback does not name (a form,
+  a template, a model). Tell the model which chunk contains the failing frame.
+  Resolve before starting:
+  - Whether sqlite-vec allows a plain `WHERE` on `+` auxiliary columns. If not, those
+    columns become metadata columns, a schema change that requires rebuilding existing
+    indexes.
+  - Path matching. Traceback paths and stored `os.walk` paths must be normalized on both
+    sides (for example `os.path.realpath`).
+  - Overlapping line-window chunks (`.html`, `.txt`, unparseable files) can both contain
+    the line. Pick the tightest match.
+  Lowering `EXPLAIN_ERRORS_RAG_TOP_K` remains a fallback candidate if pinning alone does
+  not fix the case.
+  Known limit: Python chunks are top-level defs only, so a crash in a class-based view
+  pins the whole class. Method-level chunking is a separate follow-up, not part of this
+  item.
+  Test with the harness before and after. missing_post_key is the target case.
+  Verify: `explain_errors/rag/retriever.py` on `main` selects a chunk by file and line
+  before the vector query, and a harness run recorded in evals/README.md compares the
+  change.
 
 - **working-tree-diff-context**: include `git diff HEAD`, scoped to files that appear
   as project frames in the traceback, in the prompt so the explanation can name the
