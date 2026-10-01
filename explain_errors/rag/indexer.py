@@ -1,5 +1,6 @@
 """File discovery, chunking, and embedding for the RAG source index."""
 import ast
+import contextlib
 import os
 
 from django.conf import settings
@@ -167,16 +168,21 @@ def build_index():
         os.remove(tmp_path)
 
     dimensions = len(embeddings[0]) if embeddings else 1536
-    with VectorStore(tmp_path) as store:
-        store.create(dimensions)
-        store.add(
-            (file_path, start_line, end_line, sanitized_text, embedding)
-            for (file_path, start_line, end_line, _text), sanitized_text, embedding in zip(
-                raw_chunks, sanitized_texts, embeddings
+    try:
+        with VectorStore(tmp_path) as store:
+            store.create(dimensions)
+            store.add(
+                (file_path, start_line, end_line, sanitized_text, embedding)
+                for (file_path, start_line, end_line, _text), sanitized_text, embedding in zip(
+                    raw_chunks, sanitized_texts, embeddings
+                )
             )
-        )
 
-    os.replace(tmp_path, index_path)
+        os.replace(tmp_path, index_path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp_path)
+        raise
 
     return {
         "files_scanned": len(files),

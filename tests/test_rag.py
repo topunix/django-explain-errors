@@ -174,6 +174,45 @@ class IndexerBuildTest(SimpleTestCase):
             ]
             self.assertEqual(leftovers, [])
 
+    def test_failed_rebuild_keeps_previous_index_and_removes_temp_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "app.py"), "w") as f:
+                f.write(SAMPLE_MODULE)
+
+            index_path = os.path.join(tmp, "index.db")
+
+            with override_settings(
+                EXPLAIN_ERRORS_RAG_INCLUDE=[tmp],
+                EXPLAIN_ERRORS_RAG_INDEX_PATH=index_path,
+            ):
+                with patch(
+                    "explain_errors.rag.indexer.get_openai_client",
+                    return_value=_mock_embed_client([0.1, 0.2, 0.3]),
+                ):
+                    build_index()
+
+                    with open(index_path, "rb") as f:
+                        original_bytes = f.read()
+                    with VectorStore(index_path) as store:
+                        original_count = store.count()
+                    self.assertGreater(original_count, 0)
+
+                    with patch.object(
+                        VectorStore, "add", side_effect=RuntimeError("add failed")
+                    ):
+                        with self.assertRaisesRegex(RuntimeError, "add failed"):
+                            build_index()
+
+            with open(index_path, "rb") as f:
+                self.assertEqual(f.read(), original_bytes)
+            with VectorStore(index_path) as store:
+                self.assertEqual(store.count(), original_count)
+
+            leftovers = [
+                name for name in os.listdir(tmp) if name.startswith("index.db.tmp-")
+            ]
+            self.assertEqual(leftovers, [])
+
     def test_build_index_redacts_secrets_in_stored_chunk_text(self):
         with tempfile.TemporaryDirectory() as tmp:
             src = os.path.join(tmp, "src")
