@@ -174,6 +174,37 @@ class IndexerBuildTest(SimpleTestCase):
             ]
             self.assertEqual(leftovers, [])
 
+    def test_build_index_redacts_secrets_in_stored_chunk_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "src")
+            os.makedirs(src)
+            with open(os.path.join(src, "config.py"), "w") as f:
+                f.write(
+                    "def load():\n"
+                    "    api_key = 'sk-index-secret-value'\n"
+                    "    return api_key\n"
+                )
+
+            index_path = os.path.join(tmp, "index.db")
+            embed_client = _mock_embed_client([0.1, 0.2, 0.3])
+
+            with override_settings(
+                EXPLAIN_ERRORS_RAG_INCLUDE=[src],
+                EXPLAIN_ERRORS_RAG_INDEX_PATH=index_path,
+            ):
+                with patch(
+                    "explain_errors.rag.indexer.get_openai_client",
+                    return_value=embed_client,
+                ):
+                    build_index()
+
+            with VectorStore(index_path) as store:
+                rows = store.query([0.1, 0.2, 0.3], 10)
+
+        self.assertEqual(len(rows), 1)
+        self.assertNotIn("sk-index-secret-value", rows[0]["chunk_text"])
+        self.assertIn("[REDACTED]", rows[0]["chunk_text"])
+
 
 def _raise_json_error():
     return json.loads("{not valid json")
