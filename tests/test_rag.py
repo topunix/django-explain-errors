@@ -174,6 +174,37 @@ class IndexerBuildTest(SimpleTestCase):
             ]
             self.assertEqual(leftovers, [])
 
+    def test_build_index_redacts_secrets_in_stored_chunk_text(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = os.path.join(tmp, "src")
+            os.makedirs(src)
+            with open(os.path.join(src, "config.py"), "w") as f:
+                f.write(
+                    "def load():\n"
+                    "    api_key = 'sk-index-secret-value'\n"
+                    "    return api_key\n"
+                )
+
+            index_path = os.path.join(tmp, "index.db")
+            embed_client = _mock_embed_client([0.1, 0.2, 0.3])
+
+            with override_settings(
+                EXPLAIN_ERRORS_RAG_INCLUDE=[src],
+                EXPLAIN_ERRORS_RAG_INDEX_PATH=index_path,
+            ):
+                with patch(
+                    "explain_errors.rag.indexer.get_openai_client",
+                    return_value=embed_client,
+                ):
+                    build_index()
+
+            with VectorStore(index_path) as store:
+                rows = store.query([0.1, 0.2, 0.3], 10)
+
+        self.assertEqual(len(rows), 1)
+        self.assertNotIn("sk-index-secret-value", rows[0]["chunk_text"])
+        self.assertIn("[REDACTED]", rows[0]["chunk_text"])
+
 
 def _raise_json_error():
     return json.loads("{not valid json")
@@ -191,6 +222,35 @@ class RetrieverFrameExtractionTest(SimpleTestCase):
         filenames = [frame.filename for frame in frames]
         self.assertTrue(any(name.endswith("test_rag.py") for name in filenames))
         self.assertFalse(any("json" in os.path.basename(name) for name in filenames))
+
+    def test_extract_project_frames_excludes_site_packages_frame(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            site_dir = os.path.join(tmp, "venv-lib", "site-packages")
+            os.makedirs(site_dir)
+            lib_path = os.path.join(site_dir, "thirdparty.py")
+            app_path = os.path.join(tmp, "app.py")
+            with open(lib_path, "w") as f:
+                f.write("def boom():\n    raise ValueError('lib failure')\n")
+            with open(app_path, "w") as f:
+                f.write("def call(fn):\n    return fn()\n")
+
+            namespaces = {}
+            for path in (lib_path, app_path):
+                ns = {}
+                with open(path) as f:
+                    exec(compile(f.read(), path, "exec"), ns)
+                namespaces[path] = ns
+
+            # site-packages sits inside the include dir, so only the
+            # site-packages rule can exclude it.
+            with override_settings(EXPLAIN_ERRORS_RAG_INCLUDE=[tmp]):
+                try:
+                    namespaces[app_path]["call"](namespaces[lib_path]["boom"])
+                except ValueError as exc:
+                    frames = extract_project_frames(exc)
+
+        filenames = [frame.filename for frame in frames]
+        self.assertEqual(filenames, [app_path])
 
     def test_extract_project_frames_empty_without_traceback(self):
         self.assertEqual(extract_project_frames(ValueError("no traceback")), [])
@@ -227,6 +287,50 @@ class RetrieverTopKTest(SimpleTestCase):
 
     def test_retrieve_chunks_returns_empty_when_disabled(self):
         self.assertEqual(retrieve_chunks(ValueError("boom")), [])
+
+
+class RetrieverQuerySanitizationTest(SimpleTestCase):
+
+    @requires_sqlite_vec
+    def test_query_text_is_sanitized_before_embedding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module_path = os.path.join(tmp, "leaky.py")
+            with open(module_path, "w") as f:
+                f.write(
+                    "def fail():\n"
+                    "    password = 'hunter2-source-secret'; raise ValueError(\n"
+                    "        'token=msg-secret-value')\n"
+                )
+
+            index_path = os.path.join(tmp, "index.db")
+            with VectorStore(index_path) as store:
+                store.create(3)
+                store.add([("leaky.py", 1, 3, "chunk", [1.0, 0.0, 0.0])])
+
+            namespace = {}
+            exec(compile(open(module_path).read(), module_path, "exec"), namespace)
+            try:
+                namespace["fail"]()
+            except ValueError as exc:
+                captured = exc
+
+            embed_client = _mock_embed_client([1.0, 0.0, 0.0])
+            with override_settings(
+                EXPLAIN_ERRORS_RAG_ENABLED=True,
+                EXPLAIN_ERRORS_RAG_INDEX_PATH=index_path,
+                EXPLAIN_ERRORS_RAG_INCLUDE=[tmp],
+            ):
+                with patch(
+                    "explain_errors.rag.retriever.get_openai_client",
+                    return_value=embed_client,
+                ):
+                    retrieve_chunks(captured)
+
+        embed_client.embeddings.create.assert_called_once()
+        (query_text,) = embed_client.embeddings.create.call_args.kwargs["input"]
+        self.assertNotIn("msg-secret-value", query_text)
+        self.assertNotIn("hunter2-source-secret", query_text)
+        self.assertIn("[REDACTED]", query_text)
 
 
 @override_settings(DEBUG=True, OPENAI_API_KEY="test-key")
