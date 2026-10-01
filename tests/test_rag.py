@@ -192,6 +192,35 @@ class RetrieverFrameExtractionTest(SimpleTestCase):
         self.assertTrue(any(name.endswith("test_rag.py") for name in filenames))
         self.assertFalse(any("json" in os.path.basename(name) for name in filenames))
 
+    def test_extract_project_frames_excludes_site_packages_frame(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            site_dir = os.path.join(tmp, "venv-lib", "site-packages")
+            os.makedirs(site_dir)
+            lib_path = os.path.join(site_dir, "thirdparty.py")
+            app_path = os.path.join(tmp, "app.py")
+            with open(lib_path, "w") as f:
+                f.write("def boom():\n    raise ValueError('lib failure')\n")
+            with open(app_path, "w") as f:
+                f.write("def call(fn):\n    return fn()\n")
+
+            namespaces = {}
+            for path in (lib_path, app_path):
+                ns = {}
+                with open(path) as f:
+                    exec(compile(f.read(), path, "exec"), ns)
+                namespaces[path] = ns
+
+            # site-packages sits inside the include dir, so only the
+            # site-packages rule can exclude it.
+            with override_settings(EXPLAIN_ERRORS_RAG_INCLUDE=[tmp]):
+                try:
+                    namespaces[app_path]["call"](namespaces[lib_path]["boom"])
+                except ValueError as exc:
+                    frames = extract_project_frames(exc)
+
+        filenames = [frame.filename for frame in frames]
+        self.assertEqual(filenames, [app_path])
+
     def test_extract_project_frames_empty_without_traceback(self):
         self.assertEqual(extract_project_frames(ValueError("no traceback")), [])
 
