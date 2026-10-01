@@ -229,6 +229,50 @@ class RetrieverTopKTest(SimpleTestCase):
         self.assertEqual(retrieve_chunks(ValueError("boom")), [])
 
 
+class RetrieverQuerySanitizationTest(SimpleTestCase):
+
+    @requires_sqlite_vec
+    def test_query_text_is_sanitized_before_embedding(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            module_path = os.path.join(tmp, "leaky.py")
+            with open(module_path, "w") as f:
+                f.write(
+                    "def fail():\n"
+                    "    password = 'hunter2-source-secret'; raise ValueError(\n"
+                    "        'token=msg-secret-value')\n"
+                )
+
+            index_path = os.path.join(tmp, "index.db")
+            with VectorStore(index_path) as store:
+                store.create(3)
+                store.add([("leaky.py", 1, 3, "chunk", [1.0, 0.0, 0.0])])
+
+            namespace = {}
+            exec(compile(open(module_path).read(), module_path, "exec"), namespace)
+            try:
+                namespace["fail"]()
+            except ValueError as exc:
+                captured = exc
+
+            embed_client = _mock_embed_client([1.0, 0.0, 0.0])
+            with override_settings(
+                EXPLAIN_ERRORS_RAG_ENABLED=True,
+                EXPLAIN_ERRORS_RAG_INDEX_PATH=index_path,
+                EXPLAIN_ERRORS_RAG_INCLUDE=[tmp],
+            ):
+                with patch(
+                    "explain_errors.rag.retriever.get_openai_client",
+                    return_value=embed_client,
+                ):
+                    retrieve_chunks(captured)
+
+        embed_client.embeddings.create.assert_called_once()
+        (query_text,) = embed_client.embeddings.create.call_args.kwargs["input"]
+        self.assertNotIn("msg-secret-value", query_text)
+        self.assertNotIn("hunter2-source-secret", query_text)
+        self.assertIn("[REDACTED]", query_text)
+
+
 @override_settings(DEBUG=True, OPENAI_API_KEY="test-key")
 class MiddlewareRagIntegrationTest(SimpleTestCase):
 
