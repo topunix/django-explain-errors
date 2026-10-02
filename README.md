@@ -19,8 +19,8 @@ failing function (`clone_latest_post`) and gives the one-line fix. Real `gpt-4o-
 the eval harness.*
 
 - **Strongly recommended:** enable RAG over your project, so explanations name the actual file and function instead of guessing ([measured in the eval harness](#does-rag-actually-help)). It is off by default only because [setup](#codebase-aware-explanations-rag) takes three steps.
-- Explanations in your language via `EXPLAIN_ERRORS_LANGUAGE`, with code and identifiers kept in English
 - Works with OpenAI, Claude, or any OpenAI-compatible endpoint, including local models via Ollama
+- Explanations in your language via `EXPLAIN_ERRORS_LANGUAGE`, with code and identifiers kept in English
 - Sync and async views, traceback redaction, rate limiting
 - Local development only: requires `DEBUG = True`
 
