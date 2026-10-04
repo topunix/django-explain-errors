@@ -73,7 +73,7 @@ cython_debug/
 
 # VS Code
 .vscode/
-.claude/
+.claude/settings.local.json
 .explain_errors_index.db
 
 # Eval harness (docs/tasks/eval-harness.md): real API output, regenerate
