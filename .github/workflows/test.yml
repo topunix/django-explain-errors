@@ -31,3 +31,29 @@ jobs:
         env:
           DJANGO_SETTINGS_MODULE: test_settings
         run: python -m django test tests
+
+  commit-email:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    name: commit-email
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check commit author emails
+        env:
+          ALLOWED_COMMIT_EMAIL: ${{ vars.ALLOWED_COMMIT_EMAIL }}
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ -z "$ALLOWED_COMMIT_EMAIL" ]; then
+            echo "::error::Repository variable ALLOWED_COMMIT_EMAIL is empty or not set. Define it under Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+          bad=$(git log --no-merges --format='%h %ae' "origin/${BASE_REF}..${HEAD_SHA}" \
+            | awk '$2 != ENVIRON["ALLOWED_COMMIT_EMAIL"] { printf "%s%s <%s>", sep, $1, $2; sep = ", " }')
+          if [ -n "$bad" ]; then
+            echo "::error::Commits with an unexpected author email: ${bad}"
+            exit 1
+          fi
+          echo "All commits use the allowed author email."
