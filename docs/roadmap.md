@@ -114,8 +114,40 @@ Sequencing below follows from that.
   silently with no repository or no `git` binary.
   Verify: `EXPLAIN_ERRORS_INCLUDE_DIFF` appears in `explain_errors/` on `main`.
 
+- **process-exception-split**: split `ExplainErrorsMiddleware.process_exception`
+  into named steps. No behavior change.
+  Why it is worth doing:
+  - Bugs become isolatable. Today one long function builds the prompt,
+    augments it with RAG, calls the model, prints to stdout, and shapes the
+    response. A fault in any stage means reading all five.
+  - Each stage becomes directly testable. Prompt construction (RAG on, off,
+    failing) and generation (API error, truncation, empty `choices`) get
+    their own unit tests instead of being reachable only through a full
+    request.
+  - The control flow becomes readable at a glance: DEBUG guard, throttle,
+    generate, inject, respond.
+  - It eases dedup-identical-errors, which adds an LRU check beside the
+    throttle. Landing that in the split version keeps it a few lines instead
+    of growing the blob further.
+  - It closes the `__acall__` loose end, removing a thread-pool round-trip
+    on every exception when the middleware is left installed with
+    `DEBUG=False`.
+  Shape: `_build_prompt` (traceback, sanitization, RAG augmentation) and
+  `_generate_explanation` (model call, usage logging, truncation warning,
+  stdout). `process_exception` keeps the DEBUG guard, throttle check, debug
+  page injection, and response shaping.
+  Constraints: keep response parsing (`choices[0]`, `finish_reason`) inside
+  the `try` so a malformed response still fails open. `_build_prompt` must
+  call the module-level `sanitize_traceback`, which `evals/run.py` patches;
+  do not change that import. Move the DEBUG check in `__acall__` ahead of
+  `sync_to_async(self.process_exception)`. Do before
+  dedup-identical-errors.
+  Verify: `_build_prompt` and `_generate_explanation` exist in
+  `explain_errors/middleware.py` on `main`.
+
 - **dedup-identical-errors**: LRU hash of exception type plus top frame, so repeated
-  identical errors do not burn the sliding-window throttle. Small, slot in anywhere.
+  identical errors do not burn the sliding-window throttle. Small. Do after
+  process-exception-split.
   Verify: an LRU or hash-based seen-errors cache exists in `explain_errors/middleware.py`.
 
 - **explanation-levels**: `eli5` through `senior`. Build only if the eval harness shows the
@@ -295,12 +327,6 @@ Fold each into whichever branch already touches the relevant file.
   client should suppress or tag this so it doesn't read as an application bug in a
   Sentry-instrumented project.
   Verify: not applicable. Closes only if `client.py` is changed to address it.
-- `__acall__` dispatches to `sync_to_async(self.process_exception)` before checking `DEBUG`;
-  the guard is inside `process_exception`. Costs a thread-pool round-trip per exception when
-  the middleware is left installed with `DEBUG=False`. Two-line fix. Was intended to fold into
-  preserve-debug-page and did not, so it still needs a home.
-  Verify: a `DEBUG` check precedes the `sync_to_async(self.process_exception)` call in
-  `explain_errors/middleware.py`.
 - `PLACEHOLDER_API_KEY` substitution in `explain_errors/client.py` is unconditional on
   `base_url`. It is correct for Ollama and LM Studio, which ignore the key, and wrong for
   authenticating remote endpoints such as Anthropic or Azure, where it converts a missing key
@@ -341,6 +367,21 @@ Fold each into whichever branch already touches the relevant file.
   next touches either file.
   Verify: only one frame-classification function exists across
   `explain_errors/rag/retriever.py` and `explain_errors/tracebacks.py`.
+- `render()` in `explain_errors/tracebacks.py`: replace manual run
+  detection with `itertools.groupby`.
+  Why it is worth doing:
+  - It removes a class of off-by-one risk. The current nested
+    `while i < n and i not in kept` loop has to be simulated by hand to
+    confirm it handles the boundaries; `groupby` has no boundary to get
+    wrong.
+  - The intent is named, not implied. "Group frames into contiguous kept
+    and omitted runs" is what `groupby` says on its face.
+  - It is nearly free, because the frame-classifier consolidation above
+    already opens `tracebacks.py`.
+  Shape: `groupby` over frame indices keyed on membership in `kept`, which
+  must be a set. Same O(n) behavior and output. Fold into the same branch
+  as the frame-classifier consolidation.
+  Verify: `render()` in `tracebacks.py` uses `itertools.groupby`.
 - Before the app-frame-preserving truncation change, `process_exception`'s tail-slice built the
   traceback from `traceback.format_exc()`, which reads `sys.exc_info()` for the current thread. On
   the async path that call runs inside `sync_to_async`'s worker thread, and under a real ASGI
