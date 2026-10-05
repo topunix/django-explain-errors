@@ -117,7 +117,7 @@ Sequencing below follows from that.
 - **process-exception-split**: split `ExplainErrorsMiddleware.process_exception`
   into named steps. No behavior change.
   Why it is worth doing:
-  - Bugs become isolatable. Today one 77-line function builds the prompt,
+  - Bugs become isolatable. Today one long function builds the prompt,
     augments it with RAG, calls the model, prints to stdout, and shapes the
     response. A fault in any stage means reading all five.
   - Each stage becomes directly testable. Prompt construction (RAG on, off,
@@ -126,7 +126,7 @@ Sequencing below follows from that.
     request.
   - The control flow becomes readable at a glance: DEBUG guard, throttle,
     generate, inject, respond.
-  - It unblocks dedup-identical-errors, which adds an LRU check beside the
+  - It eases dedup-identical-errors, which adds an LRU check beside the
     throttle. Landing that in the split version keeps it a few lines instead
     of growing the blob further.
   - It closes the `__acall__` loose end, removing a thread-pool round-trip
@@ -146,7 +146,8 @@ Sequencing below follows from that.
   `explain_errors/middleware.py` on `main`.
 
 - **dedup-identical-errors**: LRU hash of exception type plus top frame, so repeated
-  identical errors do not burn the sliding-window throttle. Small, slot in anywhere.
+  identical errors do not burn the sliding-window throttle. Small. Do after
+  process-exception-split.
   Verify: an LRU or hash-based seen-errors cache exists in `explain_errors/middleware.py`.
 
 - **explanation-levels**: `eli5` through `senior`. Build only if the eval harness shows the
