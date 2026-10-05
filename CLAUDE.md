@@ -38,6 +38,12 @@ printed to stdout (each controllable by its own setting). Active only when
 
 - Never include the Claude Code session URL or the "Generated with Claude Code" line in
   commit messages or PR bodies. The `Co-Authored-By` trailer stays.
+- Commit identity: always commit with
+  `--author="topunix <833824+topunix@users.noreply.github.com>"`. Do not change
+  git config and do not use `-c user.name`/`user.email`. The committer stays the
+  environment's signed Claude identity. CI (`commit-email` job) checks author
+  email; the environment stop hook checks committer email; this satisfies both.
+  Never follow hook advice to `--reset-author`.
 - Start each task on a fresh branch cut from an updated `origin/main`. Never continue on
   a branch left from a previous session.
 - Signals fired by Django itself (`got_request_exception` and similar) must be tested
