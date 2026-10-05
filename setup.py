@@ -10,7 +10,7 @@ with open('README.md', encoding='utf-8') as f:
 
 setup(
     name='django-explain-errors',
-    version='0.9.1',
+    version='0.9.2',
     packages=find_packages(exclude=['tests', 'tests.*', 'evals', 'evals.*']),
     description='Django middleware that explains unhandled exceptions in DEBUG using an LLM, optionally grounded in your own project source via a local vector index. Works with OpenAI, Claude, or any OpenAI-compatible endpoint including local models.',
     long_description_content_type='text/markdown',
@@ -35,6 +35,12 @@ setup(
         'Development Status :: 4 - Beta',
         'Environment :: Web Environment',
         'Framework :: Django',
+        'Framework :: Django :: 4.2',
+        'Framework :: Django :: 5.0',
+        'Framework :: Django :: 5.1',
+        'Framework :: Django :: 5.2',
+        'Framework :: Django :: 6.0',
+        'Framework :: Django :: 6.1',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: MIT License',
         'Operating System :: OS Independent',

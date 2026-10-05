@@ -281,41 +281,6 @@ Fold each into whichever branch already touches the relevant file.
   docs or the positioning rewrite. Fold into whichever branch next touches `README.md`, or do
   it standalone.
   Verify: no em dash (`—`) appears in `README.md` on `main`.
-- No Python/Django version matrix in CI. `.github/workflows/test.yml` now runs the suite on
-  every push and pull request (with and without the `[rag]` extra), but always against a
-  single Python/Django combination. `setup.py` declares `Django>=4.2` and
-  `python_requires>=3.9`, and nothing runs the suite against more than one pairing. Django
-  6.1 requires Python 3.12, so the matrix has to model Python and Django together, not
-  either alone, or it will silently skip the combinations that actually matter.
-  The per-version `Framework :: Django :: X.Y` classifiers (4.2 through 6.1) were removed for
-  the same reason: none were backed by a suite run. 5.0/5.1/5.2 were never executed, 6.0/6.1
-  weren't installable in the sandbox that added them, and 4.2/6.1 were only touched by the
-  three-integration compatibility checks, not the full suite. `install_requires` already
-  carries the real constraint (`Django>=4.2`), and an unlisted version doesn't block
-  installation, so nothing is lost by leaving them out. Restoring the per-version classifiers
-  is part of building this matrix, not a separate task: add back only the versions the
-  matrix actually runs green.
-  Cheap to add, since the suite is fully mocked and has no network dependency.
-  Verify: a CI workflow running `tests` against more than one Python/Django combination
-  exists under `.github/workflows/` on `main`.
-- `publish.yml` and `test.yml` run the suite with different coverage, and neither is the
-  source of truth. `publish.yml`'s release-triggered job matrices Python 3.9 and 3.12 but
-  only installs plain `.` (no `[rag]` extra); `test.yml`'s push/PR job installs both `.` and
-  `.[rag]` but only runs on 3.12. A failure that only shows up on Python 3.9 -- the oldest
-  version this package claims to support -- would pass every PR, since `test.yml` never
-  touches 3.9, and only surface when a release is cut: the same shape of gap the sqlite-vec
-  and str_recursion loose ends closed for coverage, now open for the Python version axis.
-  Consolidate on one definition instead of keeping two workflow files in sync by hand,
-  probably by having `publish.yml` call `test.yml` via `workflow_call` (add a
-  `workflow_call` trigger to `test.yml`, replace `publish.yml`'s `test` job body with a
-  `uses: ./.github/workflows/test.yml` job) so there is exactly one place that defines what
-  "the suite passes" means, and both the release gate and every PR run the same thing. Once
-  consolidated, extending that shared workflow's Python/Django matrix (the previous loose
-  end) fixes both gaps in one place instead of two.
-  Verify: `publish.yml`'s `test` job has no step bodies of its own -- it invokes `test.yml`
-  (or another shared workflow) -- and that shared workflow's coverage (Python versions x
-  `[rag]`/no-`[rag]`) is exactly what both the `release` and `push`/`pull_request` triggers
-  exercise.
 - The `description` in `setup.py` and the GitHub repository description are intentionally
   identical, so they don't drift apart again. Change both together. `setup.py`'s copy is the
   PyPI summary line, frozen per version, so it can only change in a release commit.
