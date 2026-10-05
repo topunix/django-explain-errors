@@ -3,6 +3,7 @@ name: Tests
 on:
   push:
   pull_request:
+  workflow_call:
 
 permissions:
   contents: read
@@ -11,22 +12,62 @@ jobs:
   test:
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
+        # Explicit Python/Django pairs, not a cross product. Python ranges
+        # follow Django's "What Python version can I use with Django?" FAQ,
+        # bounded by python_requires (>=3.9) and the 3.9-3.13 classifiers.
         include:
-          - name: with rag extra
-            extras: ".[rag]"
-          - name: without rag extra
-            extras: "."
-    name: Test (${{ matrix.name }})
+          - {python: "3.9", django: "4.2", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.9", django: "4.2", name: "without rag extra", extras: "."}
+          - {python: "3.10", django: "4.2", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.10", django: "4.2", name: "without rag extra", extras: "."}
+          - {python: "3.11", django: "4.2", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.11", django: "4.2", name: "without rag extra", extras: "."}
+          - {python: "3.12", django: "4.2", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.12", django: "4.2", name: "without rag extra", extras: "."}
+          - {python: "3.10", django: "5.0", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.10", django: "5.0", name: "without rag extra", extras: "."}
+          - {python: "3.11", django: "5.0", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.11", django: "5.0", name: "without rag extra", extras: "."}
+          - {python: "3.12", django: "5.0", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.12", django: "5.0", name: "without rag extra", extras: "."}
+          - {python: "3.10", django: "5.1", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.10", django: "5.1", name: "without rag extra", extras: "."}
+          - {python: "3.11", django: "5.1", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.11", django: "5.1", name: "without rag extra", extras: "."}
+          - {python: "3.12", django: "5.1", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.12", django: "5.1", name: "without rag extra", extras: "."}
+          - {python: "3.13", django: "5.1", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.13", django: "5.1", name: "without rag extra", extras: "."}
+          - {python: "3.10", django: "5.2", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.10", django: "5.2", name: "without rag extra", extras: "."}
+          - {python: "3.11", django: "5.2", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.11", django: "5.2", name: "without rag extra", extras: "."}
+          - {python: "3.12", django: "5.2", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.12", django: "5.2", name: "without rag extra", extras: "."}
+          - {python: "3.13", django: "5.2", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.13", django: "5.2", name: "without rag extra", extras: "."}
+          - {python: "3.12", django: "6.0", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.12", django: "6.0", name: "without rag extra", extras: "."}
+          - {python: "3.13", django: "6.0", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.13", django: "6.0", name: "without rag extra", extras: "."}
+          - {python: "3.12", django: "6.1", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.12", django: "6.1", name: "without rag extra", extras: "."}
+          - {python: "3.13", django: "6.1", name: "with rag extra", extras: ".[rag]"}
+          - {python: "3.13", django: "6.1", name: "without rag extra", extras: "."}
+    name: Test (py${{ matrix.python }}, Django ${{ matrix.django }}, ${{ matrix.name }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python }}
       - name: Install package and dependencies
         run: |
           python -m pip install --upgrade pip
           pip install ${{ matrix.extras }}
+      - name: Pin Django ${{ matrix.django }}
+        run: pip install "Django~=${{ matrix.django }}.0"
       - name: Run tests
         env:
           DJANGO_SETTINGS_MODULE: test_settings
