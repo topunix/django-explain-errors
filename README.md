@@ -5,6 +5,7 @@ Explains Django exceptions on the debug page, pointing at the real fix in your o
 <p align="center">
   <a href="https://pypi.org/project/django-explain-errors/"><img src="https://img.shields.io/pypi/v/django-explain-errors" alt="PyPI version"></a>
   <a href="https://pypi.org/project/django-explain-errors/"><img src="https://img.shields.io/pypi/pyversions/django-explain-errors" alt="Python versions"></a>
+  <a href="https://pypi.org/project/django-explain-errors/"><img src="https://img.shields.io/pypi/djversions/django-explain-errors" alt="Django versions"></a>
   <a href="https://github.com/topunix/django-explain-errors/actions/workflows/test.yml"><img src="https://github.com/topunix/django-explain-errors/actions/workflows/test.yml/badge.svg?branch=main" alt="Tests"></a>
   <a href="https://github.com/topunix/django-explain-errors/blob/main/LICENSE"><img src="https://img.shields.io/pypi/l/django-explain-errors" alt="License"></a>
 </p>
