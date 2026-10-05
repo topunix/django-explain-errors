@@ -1,7 +1,8 @@
 # Eval methodology notes
 
-**The truncation caveat, resolved.** Earlier versions of this section
-carried an unresolved caveat, twice, instead of settling it: before the
+History of how the eval questions evolved and harness bugs that affected past results. Current results and limitations are in README.md.
+
+**The truncation caveat, resolved.** Before the
 `app-frame-preserving truncation` fix, `OPENAI_MAX_TRACEBACK_CHARS` kept
 only the tail of the raw traceback, which for a Django ORM stack
 routinely dropped the application frames and left only library

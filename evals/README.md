@@ -3,23 +3,17 @@
 A manually run harness that scores RAG-on vs RAG-off across 15 Django
 failures, judged pairwise by an independent model.
 
-TL;DR
+**TL;DR**
 
 - **Result:** RAG-on won 35 of 43 scored comparisons (5 RAG-off, 3 ties, 3 runs).
 - **Biggest gains:** `points_to_fix_location` and `no_fabrication`.
 - **Latency:** p50 2.22s RAG-on vs 2.12s RAG-off.
 - **Cost:** about $1.37 per `--runs 3` pass, mostly the judge.
-- **Scope:** not part of the test suite.
-
-A tool the maintainer runs by hand when a change might affect explanation
-quality: a scored RAG-on vs RAG-off comparison across a fixed set of
-15 Django failures (`evals/fixtures.py`), run against a small fixture blog
-app (`evals/fixture_app/`).
 
 This is **not** part of the test suite. Nothing here runs under
 `python -m django test tests`, and nothing here is imported by
-`explain_errors/`. It costs money, hits two real API endpoints, and gives
-slightly different answers every run.
+`explain_errors/`. It costs money, hits two real APIs, and is
+nondeterministic.
 
 ## What it costs
 
@@ -120,15 +114,14 @@ groups by where the cause lives:
   extra source context needed to identify it.
 
 See the Results section below for what three runs actually show: RAG-on won
-convincingly in both groups, and by a wider margin in group B than in group
-A. Group B was designed as a RAG-neutral control; the data says it isn't
+convincingly in both groups. Group B was designed as a RAG-neutral control; the data says it isn't
 one.
 
 Below the win counts:
 
 - **Per-question yes counts**, split by group: how often each side
   correctly identified the cause, pointed at the fix location, proposed a
-  working fix, and was written for a learner. Useful for diagnosing *why*
+  working fix, avoided fabrication, and was written for a learner. Useful for diagnosing *why*
   a side won or lost, not just that it did.
 - **Latency**: mean and p50, RAG-off vs RAG-on. This is not a side note.
   `process_exception` blocks the request path today, so p50 here is what
