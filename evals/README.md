@@ -1,7 +1,24 @@
 # Eval harness
 
-A manually run harness that scores RAG-on vs RAG-off across 15 Django
-failures, judged pairwise by an independent model.
+Does grounding an error explanation in your project's own source code make it
+better? This harness measures that.
+
+django-explain-errors can explain an exception in two modes:
+
+- **RAG-off:** the model sees the Django traceback (sanitized and
+  truncated) plus a fixed instruction prompt, and no project source. It has
+  to guess what the surrounding code looks like.
+- **RAG-on:** the model also sees excerpts of your project's source, found
+  by meaning (vector similarity, not keyword matching) in a local index.
+  The search query is the exception type, its message, and the code around
+  the failing line.
+
+The harness triggers 15 known failures in a small fixture blog app, collects
+both explanations for each, and asks an independent judge model to pick the
+better one and answer specific questions: did it find the cause, point to
+the fix location, propose a working fix, avoid fabricated details, and
+explain it for a learner. The goal is to show whether RAG is worth enabling,
+and for which kinds of errors.
 
 **TL;DR**
 
@@ -14,6 +31,23 @@ This is **not** part of the test suite. Nothing here runs under
 `python -m django test tests`, and nothing here is imported by
 `explain_errors/`. It costs money, hits two real APIs, and is
 nondeterministic.
+
+## How RAG-on retrieves source
+
+- **Chunking:** Python files are split into top-level functions and
+  classes. Templates and text files (.html, .txt), and any Python file
+  that cannot be parsed, are split into 80-line windows with 20 lines of
+  overlap.
+- **Index:** each chunk is sanitized, embedded, and stored in sqlite-vec.
+- **Query:** the exception type, message, and 5 lines of source on each
+  side of the innermost project frame, sanitized and embedded the same way.
+- **Selection:** the 4 nearest chunks (configurable via
+  `EXPLAIN_ERRORS_RAG_TOP_K`) by vector distance, keeping at most one chunk
+  per file.
+- **Prompt:** the chunks are appended after the traceback under a
+  "Relevant project source:" heading.
+- **Budget:** traceback plus source is capped at 6000 characters by
+  default; source beyond that is truncated.
 
 ## What it costs
 
