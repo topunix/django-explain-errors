@@ -66,43 +66,91 @@ Sequencing below follows from that.
 
 ## Conditional or unscheduled
 
-- **Retrieval anchoring**: the eval harness showed RAG-on can anchor on an adjacent
+- **pinned-frame-retrieval**: the eval harness showed RAG-on can anchor on an adjacent
   retrieved chunk instead of the one that matters. missing_post_key redirected the fix
   to a retrieved template instead of the view.
   Root cause (code read, Oct 2026): retrieval is vector similarity only. The innermost
   project frame's file and line shape the query text but are never matched against the
   stored `file_path`, `start_line` and `end_line`, so the chunk containing the failing
   line is not guaranteed to be retrieved, and the one-chunk-per-file dedup can drop it.
-  Preferred fix: hybrid retrieval. Look up the chunk whose stored range contains the
-  innermost project frame's line, by exact file and line match with no embedding call,
-  and pin it ahead of the KNN results, exempt from the by-file dedup. KNN results still
-  follow, since the cause is often in related code the traceback does not name (a form,
-  a template, a model). Tell the model which chunk contains the failing frame.
-  Resolve before starting:
-  - Whether sqlite-vec allows a plain `WHERE` on `+` auxiliary columns. If not, those
-    columns become metadata columns, a schema change that requires rebuilding existing
-    indexes.
-  - Path matching. Traceback paths and stored `os.walk` paths must be normalized on both
-    sides (for example `os.path.realpath`).
-  - Overlapping line-window chunks (`.html`, `.txt`, unparseable files) can both contain
-    the line. Pick the tightest match.
-  Lowering `EXPLAIN_ERRORS_RAG_TOP_K` remains a fallback candidate if pinning alone does
-  not fix the case.
-  Known limit: Python chunks are top-level defs only, so a crash in a class-based view
-  pins the whole class. Method-level chunking is a separate follow-up, not part of this
-  item.
-  Test with the harness before and after. missing_post_key is the target case.
-  Verify: `explain_errors/rag/retriever.py` on `main` selects a chunk by file and line
-  before the vector query, and a harness run recorded in evals/README.md compares the
-  change.
+  Shape: at error time, read the failing project frame's file from disk, parse it with
+  `ast`, and find the smallest enclosing function, method, or class containing the failing
+  line. If nothing encloses it, or the file fails to parse, fall back to a line window
+  around the line. Pin that source first in the prompt, labeled as the failing location,
+  ahead of the vector search results. Drop vector results that overlap the pinned range.
+  KNN results still follow, since the cause is often in related code the traceback does
+  not name (a form, a template, a model).
+  Why it reads from disk instead of querying the index by file and line:
+  - Index line numbers drift after edits until the index is rebuilt, and `build_index()`
+    is a full rebuild with no per-file mtime or hash.
+  - Module-level lines have no chunk: a `.py` file with at least one top-level def drops
+    its module-level code.
+  - A method would return its whole class, since Python chunks are top-level defs only.
+  Indexer gap this does not fix: vector chunks are whole top-level classes (precision
+  loss, and possible embedding input-limit failure on large classes), and module-level
+  code is dropped from `.py` files that have a top-level def. Pinned-frame-retrieval fixes
+  the failing frame only, not vector search.
+  Works without the `[rag]` extra installed.
+  Separate knob: lowering `EXPLAIN_ERRORS_RAG_TOP_K` is tested in the same harness run
+  (see retrieval-arms-eval), not bundled into this change.
+  Depends on the loose end about two frame classifiers (`_is_project_path` versus the
+  `tracebacks.py` heuristic): choosing the failing project frame needs one answer to
+  "which frames are project frames", so consolidate first or in the same branch.
+  Resolve before starting (owner decisions, no defaults chosen here):
+  - (a) Innermost project frame only, or every project frame.
+  - (b) Fallback line window size.
+  Test with the harness before and after. missing_post_key is the target case. Ship
+  gated by the decision rule in retrieval-arms-eval.
+  Verify: the retriever path on `main` runs the `ast` pinned-frame lookup by default, with
+  no switch or flag gating it.
+
+- **retrieval-arms-eval** (harness work): compare retrieval combinations before building
+  any of them. Arms:
+  - (a) RAG as shipped, the baseline.
+  - (b) ast only: pinned frame, no index.
+  - (c) ast + RAG.
+  - (d) ast + Jedi + RAG.
+  - Optionally (e) ast + Jedi, no index.
+  - Optionally a lower-top-k variant of (c).
+  New fixtures, chosen so that different arms should win:
+  - a renamed model field still used in a view (the definition is outside the stack);
+  - a `reverse()` URL name typo;
+  - a template error that raises, such as an unknown filter or tag (`TemplateSyntaxError`);
+  - an error in one method of a large class-based view;
+  - an error in module-level code such as `urlpatterns`;
+  - a stale-index case where source is edited after `build_index()`.
+  Give the judge the retrieved context for every arm, or correct source-derived details
+  score as fabrication (ties to the existing judge limitation in `evals/README.md`).
+  Record win rate, tokens, latency, and cost per arm in `evals/README.md`.
+  Arms (b) through (e) may be implemented harness-side or behind an internal switch;
+  nothing user-facing ships from this entry.
+  Decision rules:
+  - Ship pinned-frame-retrieval if (c) beats (a).
+  - Pursue jedi-dependency-resolution only if (d) beats (c).
+  - Take up the retrieval-default strategic question if (b) or (e) comes close to (c).
+  Verify: `evals/README.md` records a harness run comparing these arms.
+
+- **jedi-dependency-resolution** (conditional on retrieval-arms-eval, only if arm (d)
+  beats arm (c)): from the failing line, resolve referenced Python names to their
+  definitions in other project files (example: `post.title` in a view resolves to
+  `class Post` in `models.py`). Add those definitions to the prompt after the pinned frame
+  from pinned-frame-retrieval, and dedupe against vector results.
+  Jedi is used in-process as a library behind an optional extra, not through an LSP or MCP
+  server. This is consistent with the Rejected section, which rules out an editor
+  extension or MCP server as a second distribution artifact; an optional extra adds none.
+  Limits: Jedi cannot follow strings (template paths, `reverse()` names, settings keys,
+  `request.POST` keys), so it complements RAG rather than replacing it. It reads from
+  disk, so it has no staleness.
+  Verify: an `extras_require` entry naming jedi exists in `setup.py`.
 
 - **working-tree-diff-context**: include `git diff HEAD`, scoped to files that appear
   as project frames in the traceback, in the prompt so the explanation can name the
   edit that caused the error. Input to the model only; nothing new is displayed. In
   local development the breaking change is usually uncommitted, which `git log` never
   shows, so the diff is the signal and history is not.
-  Unproven: RAG already retrieves current source, and may reach the same answer when
-  both sides of a mismatch are retrieved (a renamed model field plus the view still
+  Unproven: RAG already retrieves current source, but only if the index was rebuilt after
+  the edit; pinned-frame-retrieval reads current source from disk. RAG may reach the same
+  answer when both sides of a mismatch are retrieved (a renamed model field plus the view still
   using the old name). The diff's distinct value, if any, is where current source alone
   is ambiguous: renamed versus deleted versus never existed.
   Build the harness comparison first: 4 to 5 regression fixtures, each a working
@@ -370,5 +418,14 @@ Fold each into whichever branch already touches the relevant file.
 - Whether explain-errors-language plus django-docs-links is enough to carry the learning-aid
   positioning, or whether it needs a third distinguishing feature before the README rewrite
   is credible.
+- **retrieval-default**: if ast only (or ast + Jedi) captures most of RAG's measured gain,
+  consider making it the zero-setup default with RAG as opt-in, controlled by one setting
+  (for example `EXPLAIN_ERRORS_RETRIEVAL`).
+  Motivation: RAG's setup cost (the extra, the index build, rebuilds after edits), that
+  `build_index()` sends every indexed chunk to the embeddings provider, and the
+  anthropic-rag-embeddings gap.
+  Positioning implication: the differentiator becomes grounding in the user's own code,
+  with RAG as one mechanism. The README positioning text would change accordingly.
+  Decide only from retrieval-arms-eval results.
 
 ---
