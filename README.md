@@ -496,37 +496,29 @@ django.db.utils.IntegrityError: NOT NULL constraint failed: blog_post.author_id
 
 ### Does RAG actually help?
 
-To check whether RAG-grounded explanations are actually better, not just
-longer, the package ships an eval harness (`evals/`): fifteen deliberately
-broken Django views, each explained twice (once from the traceback alone,
-once with RAG enabled) and judged by a separate model, blind to which
-explanation is which, against the error's known cause and correct fix
-location. Which side the judge sees as "A" is randomized per comparison so
-position can't bias the result.
+The package can explain an error in two ways:
 
-Across three runs (45 judged comparisons, 2 judge failures, 43 scored),
-RAG-on won 35, RAG-off 5, and 3 tied. The gap isn't spread evenly across
-everything the judge checks. It's concentrated in whether the explanation
-names the right file and function, and whether it invents details along
-the way: on `points_to_fix_location`, RAG-on answered yes in 26 of the
-group-A comparisons against RAG-off's 13; on `no_fabrication`, 26 against
-17. Without source access, `gpt-4o-mini` tends to invent a
-plausible-sounding function name or parameter rather than say it doesn't
-know; given the actual code via RAG, it mostly does not.
+- **RAG-off (default):** the model sees only the Django traceback.
+- **RAG-on:** the model also sees relevant source code from your project, retrieved from a local index.
 
-Three limitations are worth knowing before trusting this uncritically: RAG
-can anchor on the wrong retrieved chunk, as it did in one fixture
-(`missing_post_key`) where the fix got redirected to a retrieved template
-instead of the view; the judge is shown the failing function's own
-source, which is the same source RAG-on's retriever draws from, so part
-of RAG-on's `no_fabrication` advantage may be judge and generator
-overlapping on material RAG-off never sees rather than RAG-on being more
-careful; and claim statuses are spot-checked, not exhaustively audited --
-a script that flagged 14 of 363 claims on one run, all correct on manual
-inspection, is a sample that turned up no false positive, not a proof
-that none exists. Full per-fixture results, the judge prompt, and how to
-reproduce this (about $1.37 for a `--runs 3` pass, most of it judge cost)
-are in [`evals/README.md`](evals/README.md).
+The eval harness in `evals/` tests whether RAG-on explanations are more accurate, not just longer. It triggers 15 deliberately broken Django views, explains each one both ways, and has a separate judge model compare the two against the error's known cause and fix location. The judge doesn't know which explanation used RAG, and their order is randomized.
+
+**Results (3 runs, 43 scored comparisons):** RAG-on won 35, RAG-off won 5, and 3 tied.
+
+Most of the gap comes from two checks, measured on the 10 fixtures whose cause is in the app's own code (30 comparisons):
+
+- **Points to the right file and function:** RAG-on 26, RAG-off 13
+- **Avoids invented details:** RAG-on 26, RAG-off 17
+
+Without your source, gpt-4o-mini tends to invent a plausible function name or parameter rather than admit it doesn't know. With the real code in front of it, it mostly doesn't.
+
+**Limitations:**
+
+- RAG can retrieve the wrong code. In one fixture (`missing_post_key`), it pointed the fix at a template instead of the view.
+- The judge checks claims against the same source RAG-on retrieves from, which may inflate RAG-on's score for avoiding invented details.
+- Claims are spot-checked, not fully audited. All 14 claims flagged on one run held up on manual review, but that is a sample, not proof.
+
+Full results, methodology, and how to reproduce (about $1.37 per `--runs 3` pass) are in [evals/README.md](evals/README.md).
 
 ## License
 
