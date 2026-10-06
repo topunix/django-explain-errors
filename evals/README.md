@@ -36,8 +36,8 @@ nondeterministic.
 
 - **Chunking:** Python files are split into top-level functions and
   classes. Templates and text files (.html, .txt), and any Python file
-  that cannot be parsed, are split into 80-line windows with 20 lines of
-  overlap.
+  that cannot be parsed or has no top-level functions or classes, are
+  split into 80-line windows with 20 lines of overlap.
 - **Index:** each chunk is sanitized, embedded, and stored in sqlite-vec.
 - **Query:** the exception type, message, and 5 lines of source on each
   side of the innermost project frame, sanitized and embedded the same way.
@@ -47,7 +47,8 @@ nondeterministic.
 - **Prompt:** the chunks are appended after the traceback under a
   "Relevant project source:" heading.
 - **Budget:** traceback plus source is capped at 6000 characters by
-  default; source beyond that is truncated.
+  default; source beyond that is truncated. Set via
+  `EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS`.
 
 ## What it costs
 
