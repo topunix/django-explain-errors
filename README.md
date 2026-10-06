@@ -518,11 +518,11 @@ Without your source, gpt-4o-mini tends to invent a plausible function name or pa
 - The judge checks claims against the same source RAG-on retrieves from, which may inflate RAG-on's score for avoiding invented details.
 - Claims are spot-checked, not fully audited. All 14 claims flagged on one run held up on manual review, but that is a sample, not proof.
 
-Full results, methodology, and how to reproduce (about $1.37 per `--runs 3` pass) are in [evals/README.md](evals/README.md).
+Full results, methodology, and how to reproduce (about $1.37 per `--runs 3` pass) are in [evals/README.md](https://github.com/topunix/django-explain-errors/blob/main/evals/README.md).
 
 ## License
 
-This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
+This project is licensed under the MIT License. See the [LICENSE](https://github.com/topunix/django-explain-errors/blob/main/LICENSE) file for details.
 
 ## Contributing
 
