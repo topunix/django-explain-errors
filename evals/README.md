@@ -1,7 +1,7 @@
 # Eval harness
 
-Does grounding an error explanation in your project's own source code make it
-better? This harness measures that.
+Does showing the model your project's source code produce more accurate error
+explanations than the traceback alone? This harness measures that.
 
 django-explain-errors can explain an exception in two modes:
 
