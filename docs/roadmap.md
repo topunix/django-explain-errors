@@ -293,6 +293,53 @@ Sequencing below follows from that.
   can be a second write-up rather than competing with the first.
   Verify: `evals/README.md` on `main` reports a verified-fix rate.
 
+- **rag-index-staleness-warning**: warn when the RAG index no longer matches the source
+  on disk. Problem: `build_index()` is a full rebuild with no per-file mtime or hash, so
+  after edits the index serves old source and old line ranges until someone rebuilds,
+  with no signal.
+  Shape: at build time, store each indexed file's path, mtime, and content hash in the
+  index database. At retrieval time, stat the indexed files; for files whose mtime
+  changed, compare the hash to rule out false positives (git checkout, editors touching
+  files). If any indexed file changed or was deleted, log a warning through the
+  `explain_errors` logger naming the count and the rebuild command
+  (`build_error_index`). Detect and warn only: no re-embedding.
+  Purpose: measure how often staleness happens in practice before building anything
+  heavier (per-file re-embedding, file watching).
+  Compatibility: existing indexes have no file metadata. Treat them as unknown freshness
+  and warn once to rebuild.
+  Decided:
+  - Count changed and deleted indexed files only, not new unindexed files. There is no
+    directory walk at retrieval time. Directory-mtime detection of new files is a possible
+    follow-up.
+  - Warn once per process. runserver's autoreload re-arms the warning after Python edits.
+  - Known gap: template edits do not trigger a reload, so a stale template does not
+    re-warn until the next Python edit.
+  Relates to: pinned-frame-retrieval (reads from disk, so unaffected) and
+  working-tree-diff-context (its "Unproven" note depends on index freshness).
+  When this ships, update the "no per-file mtime or hash" wording in
+  pinned-frame-retrieval; its read-from-disk reasoning still holds, since a warning does
+  not fix line drift.
+  Verify: `explain_errors/rag/` on `main` stores per-file hashes at build time and logs a
+  stale-index warning at retrieval time.
+
+- **data-flow-disclosure**: the README does not state what leaves the developer's
+  machine, when, or to whom.
+  Shape: a short README section stating:
+  - at error time, the sanitized traceback and prompt go to the chat endpoint;
+  - with RAG enabled, every indexed chunk (sanitized) goes to the embeddings endpoint at
+    build time, and retrieved chunks are included in the error-time prompt;
+  - pointing `OPENAI_BASE_URL` at a local server (Ollama, LM Studio) keeps all of it on
+    the machine;
+  - the default excluded directories, and how to extend them with
+    `EXPLAIN_ERRORS_RAG_EXCLUDE`;
+  - redaction via `EXPLAIN_ERRORS_REDACT_PATTERNS`.
+  Factual only: describe shipped behavior, no claims about provider retention or training
+  policies.
+  Coordinate with README restructure and README positioning rewrite so the README is not
+  rewritten twice. Small; can land on its own or fold into either.
+  Verify: README.md on `main` has a section describing what data leaves the machine and
+  when.
+
 ## Rejected (recorded so it does not resurface)
 - **Editor extension or MCP server for IDE consumption.** VS Code, PyCharm, and Zed all have
   integrated terminals, so `runserver` output is already inside the editor. The browser, not
