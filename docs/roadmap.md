@@ -104,6 +104,28 @@ Sequencing below follows from that.
   Verify: the retriever path on `main` runs the `ast` pinned-frame lookup by default, with
   no switch or flag gating it.
 
+- **judge-calibration-set** (harness work): measure how often the judge agrees with a
+  human, instead of assuming it.
+  `evals/spotcheck.py` covers one failure direction only: claims marked "contradicted"
+  that still name real source identifiers, on a filtered sample. It never checks claims
+  marked "verified" or "absent", and never checks the per-question answers or the A/B
+  winner.
+  Shape: from one results file, draw 50 claims and 15 pairwise comparisons (one per
+  fixture). Stratify the claims so each status (verified, contradicted, absent) has at
+  least 10, and fill the rest at random; "contradicted" is rare, so a purely random draw
+  would leave it too thin to measure. A script presents each item to the human grader with
+  the judge's verdict hidden: the claim plus its source excerpt, or the two explanations
+  plus the fixture's known cause. Store the human labels in `evals/calibration/`. A second
+  script compares the judge with the human labels and reports agreement overall, per claim
+  status, per question, and for the winner.
+  Thresholds: at least 85% overall claim agreement, at least 75% for each claim status,
+  and winner agreement on at least 12 of 15 comparisons. Below any threshold, results from
+  that judge configuration are reported as provisional, not as findings, until the judge
+  prompt is fixed and re-calibrated.
+  Use: re-run the agreement check whenever the judge prompt or judge model changes. Report
+  the agreement rates in `evals/README.md` next to the results they qualify.
+  Verify: `evals/README.md` on `main` reports a judge-human agreement rate.
+
 - **retrieval-arms-eval** (harness work): compare retrieval combinations before building
   any of them. Arms:
   - (a) RAG as shipped, the baseline.
@@ -128,6 +150,7 @@ Sequencing below follows from that.
   - Ship pinned-frame-retrieval if (c) beats (a).
   - Pursue jedi-dependency-resolution only if (d) beats (c).
   - Take up the retrieval-default strategic question if (b) or (e) comes close to (c).
+  Run after judge-calibration-set, so the judge is validated before comparing arms.
   Verify: `evals/README.md` records a harness run comparing these arms.
 
 - **jedi-dependency-resolution** (conditional on retrieval-arms-eval, only if arm (d)
