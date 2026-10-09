@@ -129,6 +129,10 @@ class ExplainErrorsMiddleware:
         try:
             response = await self.get_response(request)
         except Exception as exception:
+            # Skip the thread-pool round-trip entirely when inert in production.
+            # process_exception keeps its own guard for the sync path.
+            if not settings.DEBUG:
+                raise
             # process_exception performs blocking model API I/O, so run it in
             # a thread to keep the event loop free.
             response = await sync_to_async(self.process_exception)(request, exception)
@@ -143,67 +147,8 @@ class ExplainErrorsMiddleware:
 
         explanation = None
         if self.throttle.allow():
-            # Get the exception traceback, keeping application frames over
-            # library internals to cap token usage and stay within the
-            # model's context window.
-            max_tb_chars = getattr(settings, "OPENAI_MAX_TRACEBACK_CHARS", 3000)
-            tb = format_traceback(exception, max_tb_chars)
-            # Sanitize the exact payload that ships, after truncation so we
-            # don't waste work redacting frames that get discarded.
-            tb = sanitize_traceback(tb)
-
-            # Construct the prompt
-            prompt = f"Explain the following Django error in simple terms:\n\n{tb}"
-
-            # RAG: ground the explanation in the user's own project source.
-            # Opt-in and must never break the traceback-only path, so any
-            # failure here is logged and swallowed.
-            if getattr(settings, "EXPLAIN_ERRORS_RAG_ENABLED", False):
-                try:
-                    chunks = retrieve_chunks(exception)
-                    max_prompt_chars = getattr(
-                        settings, "EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS", 6000
-                    )
-                    remaining_chars = max(max_prompt_chars - len(tb), 0)
-                    rag_section = format_chunks_for_prompt(chunks, remaining_chars)
-                    if rag_section:
-                        prompt += f"\n\n{rag_section}"
-                except Exception as exc:
-                    logger.warning(
-                        "explain_errors: RAG retrieval failed, falling back to "
-                        "traceback-only prompt: %s",
-                        exc,
-                    )
-
-            try:
-                # Call model API
-                response = self.openai_client.chat.completions.create(
-                    model=self.model,
-                    messages=[
-                        {"role": "system", "content": self.system_prompt},
-                        {"role": "user", "content": prompt},
-                    ],
-                    max_tokens=self.max_tokens,
-                )
-                explanation = response.choices[0].message.content
-                usage = getattr(response, "usage", None)
-                logger.debug(
-                    "explain_errors: token usage prompt_tokens=%s completion_tokens=%s",
-                    getattr(usage, "prompt_tokens", None),
-                    getattr(usage, "completion_tokens", None),
-                )
-                if response.choices[0].finish_reason == "length":
-                    logger.warning(
-                        "explain_errors: explanation truncated by OPENAI_MAX_TOKENS=%s",
-                        self.max_tokens,
-                    )
-
-                if getattr(settings, "EXPLAIN_ERRORS_PRINT_STDOUT", True):
-                    print(f"Error explanation ({self.model}):\n", explanation)
-            except Exception as e:
-                # If the model API call fails, surface the failure but still
-                # return a 500 so the request lifecycle completes cleanly.
-                print("Failed to get an explanation from the model API:", e)
+            prompt = self._build_prompt(exception)
+            explanation = self._generate_explanation(prompt)
 
             if explanation is not None:
                 self._inject_debug_page(request, explanation)
@@ -214,6 +159,80 @@ class ExplainErrorsMiddleware:
         return JsonResponse(
             {"error": "An error occurred.", "message": explanation}, status=500
         )
+
+    def _build_prompt(self, exception):
+        """Build the user prompt: sanitized traceback, plus RAG context if enabled."""
+        # Get the exception traceback, keeping application frames over
+        # library internals to cap token usage and stay within the
+        # model's context window.
+        max_tb_chars = getattr(settings, "OPENAI_MAX_TRACEBACK_CHARS", 3000)
+        tb = format_traceback(exception, max_tb_chars)
+        # Sanitize the exact payload that ships, after truncation so we
+        # don't waste work redacting frames that get discarded.
+        tb = sanitize_traceback(tb)
+
+        # Construct the prompt
+        prompt = f"Explain the following Django error in simple terms:\n\n{tb}"
+
+        # RAG: ground the explanation in the user's own project source.
+        # Opt-in and must never break the traceback-only path, so any
+        # failure here is logged and swallowed.
+        if getattr(settings, "EXPLAIN_ERRORS_RAG_ENABLED", False):
+            try:
+                chunks = retrieve_chunks(exception)
+                max_prompt_chars = getattr(
+                    settings, "EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS", 6000
+                )
+                remaining_chars = max(max_prompt_chars - len(tb), 0)
+                rag_section = format_chunks_for_prompt(chunks, remaining_chars)
+                if rag_section:
+                    prompt += f"\n\n{rag_section}"
+            except Exception as exc:
+                logger.warning(
+                    "explain_errors: RAG retrieval failed, falling back to "
+                    "traceback-only prompt: %s",
+                    exc,
+                )
+
+        return prompt
+
+    def _generate_explanation(self, prompt):
+        """Call the model and return the explanation text, or None on failure.
+
+        Never raises: a failed or malformed response is reported on stdout and
+        yields None (or the text already extracted, if a later step failed).
+        """
+        explanation = None
+        try:
+            # Call model API
+            response = self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=self.max_tokens,
+            )
+            explanation = response.choices[0].message.content
+            usage = getattr(response, "usage", None)
+            logger.debug(
+                "explain_errors: token usage prompt_tokens=%s completion_tokens=%s",
+                getattr(usage, "prompt_tokens", None),
+                getattr(usage, "completion_tokens", None),
+            )
+            if response.choices[0].finish_reason == "length":
+                logger.warning(
+                    "explain_errors: explanation truncated by OPENAI_MAX_TOKENS=%s",
+                    self.max_tokens,
+                )
+
+            if getattr(settings, "EXPLAIN_ERRORS_PRINT_STDOUT", True):
+                print(f"Error explanation ({self.model}):\n", explanation)
+        except Exception as e:
+            # If the model API call fails, surface the failure but still
+            # return a 500 so the request lifecycle completes cleanly.
+            print("Failed to get an explanation from the model API:", e)
+        return explanation
 
     def _inject_debug_page(self, request, explanation):
         """Wire the explanation into the debug page, if all conditions hold.
