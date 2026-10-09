@@ -276,6 +276,7 @@ proof.
 - `fixtures.py`: the fixture registry, 15 records, each one URL that
   triggers one specific, realistic failure.
 - `run.py`: the harness entry point described above.
+  The fixture app sets `EXPLAIN_ERRORS_DEDUP = False` because one middleware instance serves every fixture and run, and dedup would replay cached explanations.
 - `judge.py`: the judge prompt (`JUDGE_PROMPT_TEMPLATE`, easy to edit)
   and client.
 - `spotcheck.py`: see "Spot-checking claim statuses" above.

@@ -239,6 +239,7 @@ developer is actually investigating.
 | `EXPLAIN_ERRORS_REDACT_DISABLE_DEFAULTS` | No | When `True`, skips the built-in secret/token/email redaction patterns entirely and redacts only what `EXPLAIN_ERRORS_REDACT_PATTERNS` specifies. Turning this on removes the default protection against leaking secrets and PII in tracebacks. Defaults to `False`. |
 | `EXPLAIN_ERRORS_REDACT_REPLACEMENT` | No | Replacement string substituted for anything matched by the redaction patterns. Defaults to `"[REDACTED]"`. |
 | `EXPLAIN_ERRORS_LANGUAGE` | No | Language the explanation prose is written in, as a plain name or code (for example `"Spanish"` or `"es"`). Defaults to `None`, meaning English. Exception names, identifiers, code, file paths, and tracebacks always stay in English regardless of this setting. |
+| `EXPLAIN_ERRORS_DEDUP` | No | When `True` (the default), a repeat of an error already explained in this process replays the earlier explanation instead of calling the model or using a throttle slot. Two errors are identical when they have the same exception type, the same exception message, and the same innermost project line (file, line number, and that line's source text); editing the line makes it a new error. Keeps the last 128 distinct errors per worker. Set to `False` to explain every error. |
 
 ## Using local models (Ollama)
 

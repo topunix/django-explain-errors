@@ -185,10 +185,6 @@ Sequencing below follows from that.
   silently with no repository or no `git` binary.
   Verify: `EXPLAIN_ERRORS_INCLUDE_DIFF` appears in `explain_errors/` on `main`.
 
-- **dedup-identical-errors**: LRU hash of exception type plus top frame, so repeated
-  identical errors do not burn the sliding-window throttle. Small.
-  Verify: an LRU or hash-based seen-errors cache exists in `explain_errors/middleware.py`.
-
 - **explanation-levels**: `eli5` through `senior`. Build only if the eval harness shows the
   levels genuinely diverge. The real split is intent, not verbosity: a beginner wants the
   concept, a senior wants cause and fix in two lines. Build as distinct prompts, not a tone

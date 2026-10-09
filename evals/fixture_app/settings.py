@@ -52,6 +52,11 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 EXPLAIN_ERRORS_MAX_CALLS = 10_000
 EXPLAIN_ERRORS_WINDOW_SECONDS = 60
 
+# One middleware instance serves every fixture and every --runs repeat in a
+# pass, so dedup would replay a cached explanation instead of generating a
+# fresh one and corrupt the comparison.
+EXPLAIN_ERRORS_DEDUP = False
+
 # JSON 500 body carries the explanation text, which is how the harness reads
 # it back out. Overridden per-pass by run.py, kept here as the on-disk
 # default so the fixture app is also usable interactively (`manage.py
