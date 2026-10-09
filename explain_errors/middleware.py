@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import threading
+from collections import OrderedDict
 
 from django.conf import settings
 from django.http import JsonResponse
@@ -9,12 +11,15 @@ from .client import get_openai_client
 from .debug_page import ExplainErrorsExceptionReporter
 from .sanitize import sanitize_traceback
 from .throttle import SlidingWindowThrottle
-from .tracebacks import format_traceback
+from .tracebacks import exception_dedup_key, format_traceback
 from .rag.retriever import format_chunks_for_prompt, retrieve_chunks
 
 DEFAULT_EXCEPTION_REPORTER_PATH = "django.views.debug.ExceptionReporter"
 
 logger = logging.getLogger(__name__)
+
+# Max distinct errors whose explanations are kept for replay (LRU, no TTL).
+DEDUP_CACHE_SIZE = 128
 
 EXPLANATION_WORD_BUDGET = 200
 # Generous ceiling, not a target. Billing follows tokens generated, so unused
@@ -68,8 +73,12 @@ class ExplainErrorsMiddleware:
         self._is_async = asyncio.iscoroutinefunction(get_response)
         self.openai_client = None
         self.throttle = None
+        self.dedup_enabled = False
+        self._explanation_cache = OrderedDict()
+        self._explanation_cache_lock = threading.Lock()
 
         if settings.DEBUG:
+            self.dedup_enabled = getattr(settings, "EXPLAIN_ERRORS_DEDUP", True)
             max_calls = getattr(settings, "EXPLAIN_ERRORS_MAX_CALLS", 5)
             window_seconds = getattr(settings, "EXPLAIN_ERRORS_WINDOW_SECONDS", 60)
             self.throttle = SlidingWindowThrottle(max_calls, window_seconds)
@@ -146,11 +155,22 @@ class ExplainErrorsMiddleware:
             return None
 
         explanation = None
-        if self.throttle.allow():
+        key = self._dedup_key(exception)
+        cached = self._cache_get(key) if key is not None else None
+        if cached is not None:
+            # Repeat of an error already explained: no throttle slot, no
+            # model call. Still shown on the debug page.
+            explanation = cached
+            if getattr(settings, "EXPLAIN_ERRORS_PRINT_STDOUT", True):
+                print("Error explanation: same error as an earlier one, replaying it.")
+            self._inject_debug_page(request, explanation)
+        elif self.throttle.allow():
             prompt = self._build_prompt(exception)
             explanation = self._generate_explanation(prompt)
 
             if explanation is not None:
+                if key is not None:
+                    self._cache_put(key, explanation)
                 self._inject_debug_page(request, explanation)
 
         if getattr(settings, "EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE", True):
@@ -159,6 +179,30 @@ class ExplainErrorsMiddleware:
         return JsonResponse(
             {"error": "An error occurred.", "message": explanation}, status=500
         )
+
+    def _dedup_key(self, exception):
+        """Key for the replay cache, or None (a miss). Fails open."""
+        if not self.dedup_enabled:
+            return None
+        try:
+            return exception_dedup_key(exception)
+        except Exception:
+            logger.debug("explain_errors: dedup key computation failed", exc_info=True)
+            return None
+
+    def _cache_get(self, key):
+        with self._explanation_cache_lock:
+            explanation = self._explanation_cache.get(key)
+            if explanation is not None:
+                self._explanation_cache.move_to_end(key)
+            return explanation
+
+    def _cache_put(self, key, explanation):
+        with self._explanation_cache_lock:
+            self._explanation_cache[key] = explanation
+            self._explanation_cache.move_to_end(key)
+            while len(self._explanation_cache) > DEDUP_CACHE_SIZE:
+                self._explanation_cache.popitem(last=False)
 
     def _build_prompt(self, exception):
         """Build the user prompt: sanitized traceback, plus RAG context if enabled."""

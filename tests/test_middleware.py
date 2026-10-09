@@ -192,7 +192,11 @@ class ExplainErrorsMiddlewareAsyncTest(SimpleTestCase):
         with self.assertRaises(ValueError):
             await mw(self.factory.get("/"))
 
-    @override_settings(EXPLAIN_ERRORS_MAX_CALLS=1, EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False)
+    @override_settings(
+        EXPLAIN_ERRORS_MAX_CALLS=1,
+        EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False,
+        EXPLAIN_ERRORS_DEDUP=False,
+    )
     async def test_async_path_respects_throttle(self):
         async def boom(r):
             raise ValueError("async boom")
