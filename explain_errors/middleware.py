@@ -129,6 +129,10 @@ class ExplainErrorsMiddleware:
         try:
             response = await self.get_response(request)
         except Exception as exception:
+            # Skip the thread-pool round-trip entirely when inert in production.
+            # process_exception keeps its own guard for the sync path.
+            if not settings.DEBUG:
+                raise
             # process_exception performs blocking model API I/O, so run it in
             # a thread to keep the event loop free.
             response = await sync_to_async(self.process_exception)(request, exception)

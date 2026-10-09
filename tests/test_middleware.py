@@ -216,6 +216,16 @@ class ExplainErrorsMiddlewareDebugOffTest(SimpleTestCase):
         mw = ExplainErrorsMiddleware(lambda r: None)
         self.assertIsNone(mw.process_exception(factory.get("/"), Exception("x")))
 
+    async def test_async_debug_false_does_not_dispatch_to_thread(self):
+        async def boom(r):
+            raise ValueError("async boom")
+
+        mw = ExplainErrorsMiddleware(boom)
+        with patch("explain_errors.middleware.sync_to_async") as mock_sync_to_async:
+            with self.assertRaises(ValueError):
+                await mw(AsyncRequestFactory().get("/"))
+        mock_sync_to_async.assert_not_called()
+
     def test_debug_false_handler_reraises(self):
         factory = RequestFactory()
 
