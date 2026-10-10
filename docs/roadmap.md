@@ -436,8 +436,7 @@ Fold each into whichever branch already touches the relevant file.
   consider making it the zero-setup default with RAG as opt-in, controlled by one setting
   (for example `EXPLAIN_ERRORS_RETRIEVAL`).
   Motivation: RAG's setup cost (the extra, the index build, rebuilds after edits), that
-  `build_index()` sends every indexed chunk to the embeddings provider, and the
-  anthropic-rag-embeddings gap.
+  `build_index()` sends every indexed chunk to the embeddings provider.
   Positioning implication: the differentiator becomes grounding in the user's own code,
   with RAG as one mechanism. The README positioning text would change accordingly.
   Decide only from retrieval-arms-eval results.
