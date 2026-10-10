@@ -201,11 +201,6 @@ Sequencing below follows from that.
   pointed at a second corpus. Only if the static map in django-docs-links shows people want it.
   Verify: a second corpus or docs index target exists under `explain_errors/rag/` on `main`.
 
-- **Local embeddings**: sentence-transformers behind an optional extra. Motivated by the
-  privacy argument, not by adding PyTorch to a resume. Depends on `OPENAI_BASE_URL`, which is
-  what makes fully-local operation coherent.
-  Verify: an `extras_require` entry naming sentence-transformers exists in `setup.py`.
-
 - **README restructure**: move the "Debug page injection" section up, next to
   Usage, and trim Usage step 2, which repeats it; reduce "Async Support" to
   one line in Features; group the Configuration table by purpose (provider,

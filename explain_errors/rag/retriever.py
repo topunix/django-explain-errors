@@ -2,18 +2,78 @@
 import logging
 import os
 import sysconfig
+import threading
 import traceback
 
 from django.conf import settings
 
 from ..sanitize import sanitize_traceback
-from ..client import create_embeddings, get_embeddings_client
+from ..client import create_embeddings, get_embed_backend, get_embeddings_client
 from .indexer import get_embed_model, get_include_dirs, get_index_path
 from .store import VectorStore
 
 logger = logging.getLogger(__name__)
 
 CONTEXT_LINES = 5
+
+
+class EmbeddingIndexMismatchError(Exception):
+    """The index was built with a different embedding configuration than the
+    one now configured. Querying it would return meaningless results."""
+
+    def __init__(self, index_path, backend, model, index_desc, config_desc):
+        self.key = (index_path, backend, model)
+        super().__init__(
+            f"RAG index at {index_path} was built with {index_desc}, but the "
+            f"current configuration is {config_desc}. Rerun `python manage.py "
+            "build_error_index` to rebuild it."
+        )
+
+
+_warned_mismatches = set()
+_warned_lock = threading.Lock()
+
+
+def warn_index_mismatch_once(exc):
+    """Log an index mismatch once per process per (index path, config)."""
+    with _warned_lock:
+        if exc.key in _warned_mismatches:
+            return
+        _warned_mismatches.add(exc.key)
+    logger.warning(
+        "explain_errors: %s Falling back to traceback-only prompt.", exc
+    )
+
+
+def _describe(backend, model, dimension=None):
+    desc = f"backend={backend}, model={model}"
+    if dimension is not None:
+        desc += f", dimension={dimension}"
+    return desc
+
+
+def _check_index_meta(index_path, meta, backend, model, query_dimension=None):
+    """Raise EmbeddingIndexMismatchError if the index and config disagree.
+    A legacy index without metadata was necessarily built by the openai
+    backend, so it is only accepted under that backend."""
+    config_desc = _describe(backend, model, query_dimension)
+    if meta is None:
+        if backend != "openai":
+            raise EmbeddingIndexMismatchError(
+                index_path, backend, model,
+                "an older format (backend=openai, no recorded model)",
+                config_desc,
+            )
+        return
+    index_desc = _describe(meta["backend"], meta["model"], meta["dimension"])
+    if (
+        meta["backend"] != backend
+        or meta["model"] != model
+        or (query_dimension is not None and meta["dimension"] != query_dimension)
+    ):
+        raise EmbeddingIndexMismatchError(
+            index_path, backend, model, index_desc, config_desc
+        )
 
 
 def _excluded_dirs():
@@ -105,14 +165,21 @@ def retrieve_chunks(exception, top_k=None):
     query_text = build_query_text(exception, innermost)
     query_text = sanitize_traceback(query_text)
 
-    client = get_embeddings_client()
+    embed_backend = get_embed_backend()
     embed_model = get_embed_model()
-    response = create_embeddings(client, embed_model, [query_text])
-    query_embedding = response.data[0].embedding
-
     k = top_k if top_k is not None else getattr(settings, "EXPLAIN_ERRORS_RAG_TOP_K", 4)
 
     with VectorStore(index_path) as store:
+        meta = store.read_meta()
+        # Cheap check first, so a mismatch never loads a model or calls an API.
+        if meta is not None or embed_backend != "openai":
+            _check_index_meta(index_path, meta, embed_backend, embed_model)
+        client = get_embeddings_client()
+        response = create_embeddings(client, embed_model, [query_text])
+        query_embedding = response.data[0].embedding
+        _check_index_meta(
+            index_path, meta, embed_backend, embed_model, len(query_embedding)
+        )
         results = store.query(query_embedding, k)
 
     deduped = []

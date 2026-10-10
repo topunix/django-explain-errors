@@ -5,7 +5,15 @@ import os
 
 from django.conf import settings
 
-from ..client import create_embeddings, get_embeddings_client
+from ..client import (
+    BACKEND_LOCAL,
+    DEFAULT_LOCAL_EMBED_MODEL,
+    DEFAULT_OPENAI_EMBED_MODEL,
+    create_embeddings,
+    get_embed_backend,
+    get_embeddings_client,
+    validate_local_model_name,
+)
 from ..sanitize import sanitize_traceback
 from .store import VectorStore
 
@@ -60,7 +68,16 @@ def get_index_path():
 
 
 def get_embed_model():
-    return getattr(settings, "EXPLAIN_ERRORS_RAG_EMBED_MODEL", "text-embedding-3-small")
+    """Embedding model: EXPLAIN_ERRORS_RAG_EMBED_MODEL, else the default for
+    the selected backend. A leftover OpenAI model name is rejected on the
+    local backend."""
+    model = getattr(settings, "EXPLAIN_ERRORS_RAG_EMBED_MODEL", None)
+    if get_embed_backend() == BACKEND_LOCAL:
+        if not model:
+            return DEFAULT_LOCAL_EMBED_MODEL
+        validate_local_model_name(model)
+        return model
+    return model or DEFAULT_OPENAI_EMBED_MODEL
 
 
 def discover_files(include_dirs, exclude_dirs):
@@ -145,6 +162,7 @@ def build_index():
     include_dirs = get_include_dirs()
     exclude_dirs = get_exclude_dirs()
     index_path = get_index_path()
+    embed_backend = get_embed_backend()
     embed_model = get_embed_model()
 
     files = discover_files(include_dirs, exclude_dirs)
@@ -167,10 +185,14 @@ def build_index():
     if os.path.exists(tmp_path):
         os.remove(tmp_path)
 
-    dimensions = len(embeddings[0]) if embeddings else 1536
+    if embeddings:
+        dimensions = len(embeddings[0])
+    else:
+        dimensions = 384 if embed_backend == BACKEND_LOCAL else 1536
     try:
         with VectorStore(tmp_path) as store:
             store.create(dimensions)
+            store.write_meta(embed_backend, embed_model, dimensions)
             store.add(
                 (file_path, start_line, end_line, sanitized_text, embedding)
                 for (file_path, start_line, end_line, _text), sanitized_text, embedding in zip(

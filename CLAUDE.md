@@ -74,6 +74,10 @@ in the same PR that ships it.
    `None`). All OpenAI clients must be constructed via
    `explain_errors.client.get_openai_client` — no direct `OpenAI(...)`
    calls elsewhere.
+   The one exception is `EXPLAIN_ERRORS_RAG_EMBED_BACKEND="local"`, which
+   needs no key and ignores the embed base URL and key. All embeddings go
+   through `get_embeddings_client` / `create_embeddings`, which return a
+   `LocalEmbeddingsClient` for the local backend.
 4. Existing settings must keep working unchanged: `OPENAI_MODEL`,
    `OPENAI_TIMEOUT`, `OPENAI_MAX_TOKENS`, `OPENAI_MAX_TRACEBACK_CHARS`,
    `OPENAI_BASE_URL`,
@@ -93,6 +97,10 @@ in the same PR that ships it.
    unaffected.)
 RAG settings (all optional):
 - `EXPLAIN_ERRORS_RAG_ENABLED` (default False)
+- `EXPLAIN_ERRORS_RAG_EMBED_BACKEND` (`"openai"` default, or `"local"`; env var
+  then settings). With `"local"`, `EXPLAIN_ERRORS_RAG_EMBED_MODEL` defaults to
+  `all-MiniLM-L6-v2` and an OpenAI `text-embedding-*` name raises
+  `ImproperlyConfigured`.
 - `EXPLAIN_ERRORS_RAG_INDEX_PATH`, `EXPLAIN_ERRORS_RAG_TOP_K`,
   `EXPLAIN_ERRORS_RAG_EMBED_MODEL`, `EXPLAIN_ERRORS_RAG_EMBED_BASE_URL`,
   `EXPLAIN_ERRORS_RAG_EMBED_API_KEY` (both env var then settings; each falls
@@ -134,6 +142,16 @@ RAG settings (all optional):
 12. sqlite-vec is an optional dependency (`[rag]` extra). Core imports must
    never require it; RAG failures log one warning and fall back to the
    traceback-only prompt. RAG tests skip when it is absent.
+    `sentence-transformers` is likewise optional (`[local-embeddings]` extra,
+    never part of `[rag]`), imported lazily only when the local backend is
+    selected, with a missing extra raising `ImproperlyConfigured` naming the
+    pip command. Tests that need it skip when it is absent; the real-model
+    test runs only with `EXPLAIN_ERRORS_TEST_REAL_EMBEDDINGS=1`.
+13. The index stores backend, model, and dimension in a `meta` table.
+    Retrieval must raise `EmbeddingIndexMismatchError` (logged once per
+    process per index and config, then traceback-only fallback) rather than
+    query a mismatched index. A legacy index with no `meta` counts as
+    `openai`.
 
 ## Resolved: `api_called` scope
 

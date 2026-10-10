@@ -7,6 +7,7 @@ import sqlite3
 import struct
 
 TABLE = "chunks"
+META_TABLE = "meta"
 
 
 def _serialize(vector):
@@ -53,6 +54,40 @@ class VectorStore:
             """
         )
         self._conn.commit()
+
+    def write_meta(self, backend, model, dimension):
+        """Record how the index was embedded, so retrieval can refuse a
+        mismatched configuration."""
+        self._conn.execute(
+            f"CREATE TABLE IF NOT EXISTS {META_TABLE}(key TEXT PRIMARY KEY, value TEXT)"
+        )
+        self._conn.executemany(
+            f"INSERT OR REPLACE INTO {META_TABLE}(key, value) VALUES (?, ?)",
+            [
+                ("backend", backend),
+                ("model", model),
+                ("dimension", str(int(dimension))),
+            ],
+        )
+        self._conn.commit()
+
+    def read_meta(self):
+        """Return {"backend", "model", "dimension"} or None for an index
+        built before metadata existed."""
+        exists = self._conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (META_TABLE,),
+        ).fetchone()
+        if not exists:
+            return None
+        rows = dict(self._conn.execute(f"SELECT key, value FROM {META_TABLE}"))
+        if not {"backend", "model", "dimension"} <= rows.keys():
+            return None
+        return {
+            "backend": rows["backend"],
+            "model": rows["model"],
+            "dimension": int(rows["dimension"]),
+        }
 
     def add(self, chunks):
         """chunks: iterable of (file_path, start_line, end_line, chunk_text, embedding)."""

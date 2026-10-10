@@ -26,6 +26,9 @@ setup(
         'rag': [
             'sqlite-vec>=0.1.0',
         ],
+        'local-embeddings': [
+            'sentence-transformers>=2.2',
+        ],
     },
     url='https://github.com/topunix/django-explain-errors',
     author='topunix',
