@@ -41,21 +41,21 @@ better. This package is not trying to compete there.
 - Captures Django errors and exceptions
 - Shows the explanation on Django's debug page, directly under the
   exception headline (`EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`, on by default)
+- Codebase-aware explanations via RAG over a local sqlite-vec index
+  (recommended; see "Codebase-aware explanations" below)
+  - Local embeddings via an optional extra: your codebase is indexed on your machine and never uploaded to an embeddings provider (only the traceback and a few relevant snippets reach your chat model)
+  - Separate embeddings provider config, so Anthropic users can use RAG
+- Explains errors using OpenAI out of the box, Anthropic's Claude models, or any other
+  OpenAI-compatible endpoint (Ollama, LM Studio, Azure, gateways) via `OPENAI_BASE_URL`,
+  including fully local models, so no code has to leave your machine
+- Explanations in your language via `EXPLAIN_ERRORS_LANGUAGE`, with exception names,
+  identifiers, and code kept in English
 - Copy button on each code block in the explanation, so a suggested fix
   copies in one click
 - Prints the explanation to stdout, for terminal workflows and logs
   (`EXPLAIN_ERRORS_PRINT_STDOUT`, on by default)
 - Optional JSON 500 response instead of the debug page
   (`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False`)
-- Explains errors using OpenAI out of the box, Anthropic's Claude models, or any other
-  OpenAI-compatible endpoint (Ollama, LM Studio, Azure, gateways) via `OPENAI_BASE_URL`,
-  including fully local models, so no code has to leave your machine
-- Codebase-aware explanations via RAG over a local sqlite-vec index
-  (recommended; see "Codebase-aware explanations" below)
-  - Local embeddings via an optional extra: your codebase is indexed on your machine and never uploaded to an embeddings provider (only the traceback and a few relevant snippets reach your chat model)
-  - Separate embeddings provider config, so Anthropic users can use RAG
-- Explanations in your language via `EXPLAIN_ERRORS_LANGUAGE`, with exception names,
-  identifiers, and code kept in English
 - Redacts secrets, tokens, and emails from tracebacks before sending
 - Rate limits API calls with a configurable sliding window
 - Works with both sync (WSGI) and async (ASGI) views
