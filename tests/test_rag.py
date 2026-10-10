@@ -20,7 +20,6 @@ from explain_errors.rag.indexer import (
     chunk_python_text,
     discover_files,
     get_exclude_dirs,
-    get_openai_client,
 )
 from explain_errors.rag.retriever import extract_project_frames, retrieve_chunks
 from explain_errors.rag.store import VectorStore
@@ -58,7 +57,7 @@ def _mock_openai():
 
 
 def _mock_embed_client(vector):
-    """Return a MagicMock standing in for `rag.indexer.get_openai_client()`
+    """Return a MagicMock standing in for `get_embeddings_client()`
     whose embeddings.create() always returns `vector` for every input text.
     """
     client = MagicMock()
@@ -156,7 +155,7 @@ class IndexerBuildTest(SimpleTestCase):
                 EXPLAIN_ERRORS_RAG_INDEX_PATH=index_path,
             ):
                 with patch(
-                    "explain_errors.rag.indexer.get_openai_client",
+                    "explain_errors.rag.indexer.get_embeddings_client",
                     return_value=_mock_embed_client([0.1, 0.2, 0.3]),
                 ):
                     first = build_index()
@@ -186,7 +185,7 @@ class IndexerBuildTest(SimpleTestCase):
                 EXPLAIN_ERRORS_RAG_INDEX_PATH=index_path,
             ):
                 with patch(
-                    "explain_errors.rag.indexer.get_openai_client",
+                    "explain_errors.rag.indexer.get_embeddings_client",
                     return_value=_mock_embed_client([0.1, 0.2, 0.3]),
                 ):
                     build_index()
@@ -232,7 +231,7 @@ class IndexerBuildTest(SimpleTestCase):
                 EXPLAIN_ERRORS_RAG_INDEX_PATH=index_path,
             ):
                 with patch(
-                    "explain_errors.rag.indexer.get_openai_client",
+                    "explain_errors.rag.indexer.get_embeddings_client",
                     return_value=embed_client,
                 ):
                     build_index()
@@ -316,7 +315,7 @@ class RetrieverTopKTest(SimpleTestCase):
                 EXPLAIN_ERRORS_RAG_INDEX_PATH=index_path,
             ):
                 with patch(
-                    "explain_errors.rag.retriever.get_openai_client",
+                    "explain_errors.rag.retriever.get_embeddings_client",
                     return_value=_mock_embed_client([1.0, 0.0, 0.0]),
                 ):
                     chunks = retrieve_chunks(ValueError("boom"), top_k=3)
@@ -360,7 +359,7 @@ class RetrieverQuerySanitizationTest(SimpleTestCase):
                 EXPLAIN_ERRORS_RAG_INCLUDE=[tmp],
             ):
                 with patch(
-                    "explain_errors.rag.retriever.get_openai_client",
+                    "explain_errors.rag.retriever.get_embeddings_client",
                     return_value=embed_client,
                 ):
                     retrieve_chunks(captured)
@@ -397,7 +396,7 @@ class MiddlewareRagIntegrationTest(SimpleTestCase):
                 EXPLAIN_ERRORS_RAG_INDEX_PATH=index_path,
             ):
                 with patch(
-                    "explain_errors.rag.retriever.get_openai_client",
+                    "explain_errors.rag.retriever.get_embeddings_client",
                     return_value=_mock_embed_client([1.0, 0.0, 0.0]),
                 ):
                     middleware = ExplainErrorsMiddleware(lambda r: None)
@@ -461,7 +460,7 @@ class MiddlewareRagIntegrationTest(SimpleTestCase):
                 EXPLAIN_ERRORS_RAG_INDEX_PATH=index_path,
             ):
                 with patch(
-                    "explain_errors.rag.retriever.get_openai_client",
+                    "explain_errors.rag.retriever.get_embeddings_client",
                     return_value=_mock_embed_client([1.0, 0.0, 0.0]),
                 ):
                     with patch.dict(sys.modules, {"sqlite_vec": None}):
@@ -487,7 +486,7 @@ class MiddlewareRagIntegrationTest(SimpleTestCase):
                 broken_client = MagicMock()
                 broken_client.embeddings.create.side_effect = RuntimeError("embedding service down")
                 with patch(
-                    "explain_errors.rag.retriever.get_openai_client",
+                    "explain_errors.rag.retriever.get_embeddings_client",
                     return_value=broken_client,
                 ):
                     middleware = ExplainErrorsMiddleware(lambda r: None)
@@ -525,7 +524,7 @@ class MiddlewareRagAsyncTest(SimpleTestCase):
                 EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False,
             ):
                 with patch(
-                    "explain_errors.rag.retriever.get_openai_client",
+                    "explain_errors.rag.retriever.get_embeddings_client",
                     return_value=_mock_embed_client([1.0, 0.0, 0.0]),
                 ):
                     mw = ExplainErrorsMiddleware(boom)

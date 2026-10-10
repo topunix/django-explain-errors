@@ -7,7 +7,8 @@ import traceback
 from django.conf import settings
 
 from ..sanitize import sanitize_traceback
-from .indexer import get_embed_model, get_include_dirs, get_index_path, get_openai_client
+from ..client import create_embeddings, get_embeddings_client
+from .indexer import get_embed_model, get_include_dirs, get_index_path
 from .store import VectorStore
 
 logger = logging.getLogger(__name__)
@@ -104,9 +105,9 @@ def retrieve_chunks(exception, top_k=None):
     query_text = build_query_text(exception, innermost)
     query_text = sanitize_traceback(query_text)
 
-    client = get_openai_client()
+    client = get_embeddings_client()
     embed_model = get_embed_model()
-    response = client.embeddings.create(model=embed_model, input=[query_text])
+    response = create_embeddings(client, embed_model, [query_text])
     query_embedding = response.data[0].embedding
 
     k = top_k if top_k is not None else getattr(settings, "EXPLAIN_ERRORS_RAG_TOP_K", 4)

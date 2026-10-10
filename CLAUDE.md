@@ -94,7 +94,11 @@ in the same PR that ships it.
 RAG settings (all optional):
 - `EXPLAIN_ERRORS_RAG_ENABLED` (default False)
 - `EXPLAIN_ERRORS_RAG_INDEX_PATH`, `EXPLAIN_ERRORS_RAG_TOP_K`,
-  `EXPLAIN_ERRORS_RAG_EMBED_MODEL`, `EXPLAIN_ERRORS_RAG_INCLUDE`,
+  `EXPLAIN_ERRORS_RAG_EMBED_MODEL`, `EXPLAIN_ERRORS_RAG_EMBED_BASE_URL`,
+  `EXPLAIN_ERRORS_RAG_EMBED_API_KEY` (both env var then settings; each falls
+  back to the chat value, except the chat key is never reused when the embed
+  base URL differs from the chat one: `ImproperlyConfigured`),
+  `EXPLAIN_ERRORS_RAG_INCLUDE`,
   `EXPLAIN_ERRORS_RAG_EXCLUDE`, `EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS`
 5. New features must be opt-in via settings flags. Default behavior for
    existing users must not change, with two pre-1.0 exceptions:
