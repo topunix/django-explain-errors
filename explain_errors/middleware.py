@@ -5,7 +5,7 @@ from collections import OrderedDict
 
 from django.conf import settings
 from django.http import JsonResponse
-from asgiref.sync import sync_to_async
+from asgiref.sync import markcoroutinefunction, sync_to_async
 
 from .client import get_openai_client
 from .debug_page import ExplainErrorsExceptionReporter
@@ -71,6 +71,10 @@ class ExplainErrorsMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
         self._is_async = asyncio.iscoroutinefunction(get_response)
+        if self._is_async:
+            # Without this, iscoroutinefunction(self) is False and middleware
+            # above this one runs in sync mode and receives a coroutine.
+            markcoroutinefunction(self)
         self.openai_client = None
         self.throttle = None
         self.dedup_enabled = False

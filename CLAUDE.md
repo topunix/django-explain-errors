@@ -62,7 +62,10 @@ in the same PR that ships it.
 1. Middleware must remain both sync and async capable:
    `async_capable = True`, `sync_capable = True`, coroutine detection via
    `asyncio.iscoroutinefunction`, async bridging via
-   `asgiref.sync.sync_to_async`.
+   `asgiref.sync.sync_to_async`. When the middleware is async (detected
+   `get_response` is a coroutine function), `__init__` must call
+   `asgiref.sync.markcoroutinefunction(self)`; otherwise middleware above it
+   treats it as sync and receives a coroutine. Never mark on the sync path.
 2. No behavior when `DEBUG=False`. The middleware must be inert in
    production.
 3. OpenAI API key resolution order: `OPENAI_API_KEY` env var, then
