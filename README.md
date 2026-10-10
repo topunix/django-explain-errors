@@ -147,15 +147,6 @@ python manage.py check --deploy --fail-level WARNING
     The view raised a ValueError because ...
    ```
 
-## Async Support
-
-The middleware exposes both `sync_capable = True` and `async_capable = True`. At initialization it inspects `get_response` to decide whether it is part of a sync or async chain:
-
-- Under WSGI (for example `runserver` with sync views), requests flow through the synchronous handler.
-- Under ASGI (for example with async views), requests are awaited through the async handler. The blocking model API call is offloaded with `asgiref.sync.sync_to_async` so the event loop is not blocked.
-
-No additional settings are needed. See Installation above for where to place the middleware in `MIDDLEWARE`.
-
 ## Debug page injection
 
 When Django renders its debug page for a 500, `explain_errors` also inserts a banner
@@ -194,6 +185,15 @@ debug page untouched. This code can never turn a working debug page into a broke
 what Django's debug page looks like: a new section appears above the request metadata
 table. If you rely on the debug page's exact markup (a scraper, a screenshot test), account
 for this.
+
+## Async Support
+
+The middleware exposes both `sync_capable = True` and `async_capable = True`. At initialization it inspects `get_response` to decide whether it is part of a sync or async chain:
+
+- Under WSGI (for example `runserver` with sync views), requests flow through the synchronous handler.
+- Under ASGI (for example with async views), requests are awaited through the async handler. The blocking model API call is offloaded with `asgiref.sync.sync_to_async` so the event loop is not blocked.
+
+No additional settings are needed. See Installation above for where to place the middleware in `MIDDLEWARE`.
 
 ## Compatibility
 
