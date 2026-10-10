@@ -89,7 +89,7 @@ def get_embeddings_client(timeout=None):
 
 
 class EmbeddingsNotSupportedError(Exception):
-    """The configured embeddings endpoint does not appear to exist."""
+    """The configured embeddings endpoint does not exist."""
 
 
 def create_embeddings(client, model, texts):
@@ -106,9 +106,9 @@ def create_embeddings(client, model, texts):
         not_found = exc.status_code == 404 or "not found" in str(exc).lower()
         if not_found and is_anthropic:
             raise EmbeddingsNotSupportedError(
-                f"The embeddings endpoint at {base_url} does not appear to "
-                "support embeddings: Anthropic's OpenAI-compatible API does "
-                "not appear to offer one. Set "
+                f"The embeddings endpoint at {base_url} was not found: "
+                "Anthropic's OpenAI-compatible API has no embeddings "
+                "endpoint. Set "
                 "EXPLAIN_ERRORS_RAG_EMBED_BASE_URL, "
                 "EXPLAIN_ERRORS_RAG_EMBED_API_KEY and "
                 "EXPLAIN_ERRORS_RAG_EMBED_MODEL to an OpenAI-compatible "

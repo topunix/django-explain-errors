@@ -206,18 +206,6 @@ Sequencing below follows from that.
   what makes fully-local operation coherent.
   Verify: an `extras_require` entry naming sentence-transformers exists in `setup.py`.
 
-- **anthropic-rag-embeddings**: check whether RAG works for Anthropic users.
-  The indexer and retriever use the same client and `OPENAI_BASE_URL` as the
-  chat call, and Anthropic's OpenAI-compatible API may have no embeddings
-  endpoint. If so, `build_error_index` fails for Anthropic users and the
-  README's RAG recommendation does not apply to them. Check against the live
-  API first. If embeddings are unsupported, either document it in the README
-  (Anthropic section and RAG section), or add separate embedding settings
-  (for example `EXPLAIN_ERRORS_RAG_EMBED_BASE_URL` and a matching key) so
-  chat and embeddings can use different providers. Local embeddings (above)
-  would also cover this case.
-  Verify: the README's Anthropic section states whether RAG works with it.
-
 - **README restructure**: move the "Debug page injection" section up, next to
   Usage, and trim Usage step 2, which repeats it; reduce "Async Support" to
   one line in Features; group the Configuration table by purpose (provider,

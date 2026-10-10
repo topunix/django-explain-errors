@@ -240,7 +240,7 @@ class AnthropicEmbeddingsErrorTest(SimpleTestCase):
             with self.assertRaises(EmbeddingsNotSupportedError) as ctx:
                 create_embeddings(client, "text-embedding-3-small", ["x"])
         message = str(ctx.exception)
-        self.assertIn("does not appear to support embeddings", message)
+        self.assertIn("Anthropic's OpenAI-compatible API has no embeddings endpoint", message)
         self.assertIn("EXPLAIN_ERRORS_RAG_EMBED_BASE_URL", message)
         self.assertIn("EXPLAIN_ERRORS_RAG_EMBED_API_KEY", message)
         self.assertIn("EXPLAIN_ERRORS_RAG_EMBED_MODEL", message)

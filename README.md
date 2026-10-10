@@ -282,6 +282,41 @@ Reasoning models behind `OPENAI_BASE_URL` spend part of the token budget on inte
 before producing visible output. At a low `OPENAI_MAX_TOKENS`, the budget can be used up by
 reasoning alone, and the explanation comes back empty. Raise `OPENAI_MAX_TOKENS` if you see this.
 
+### RAG does not work with Anthropic alone
+
+The [RAG layer](#codebase-aware-explanations-rag) needs an embeddings endpoint, and
+Anthropic's OpenAI-compatible API has none: `POST /v1/embeddings` returns HTTP 404
+(`not_found_error`), and Anthropic does not offer its own embedding model. With only the
+config above, `build_error_index` fails with an error saying so, and retrieval at request
+time falls back to the traceback-only prompt.
+
+To use RAG with Claude, keep Anthropic for chat and point embeddings at an OpenAI-compatible
+provider with the `EXPLAIN_ERRORS_RAG_EMBED_*` settings:
+
+```python
+# Chat: Anthropic
+OPENAI_BASE_URL = "https://api.anthropic.com/v1/"
+OPENAI_API_KEY = "your_anthropic_api_key_here"
+OPENAI_MODEL = "..."
+
+# Embeddings: any OpenAI-compatible embeddings provider (OpenAI shown)
+EXPLAIN_ERRORS_RAG_ENABLED = True
+EXPLAIN_ERRORS_RAG_EMBED_BASE_URL = "https://api.openai.com/v1/"
+EXPLAIN_ERRORS_RAG_EMBED_API_KEY = "your_openai_api_key_here"
+EXPLAIN_ERRORS_RAG_EMBED_MODEL = "text-embedding-3-small"
+```
+
+Each of the three settings falls back to the chat value when unset, with one exception for
+safety: if `EXPLAIN_ERRORS_RAG_EMBED_BASE_URL` differs from the chat base URL,
+`EXPLAIN_ERRORS_RAG_EMBED_API_KEY` is required, and `ImproperlyConfigured` is raised without
+it. The chat key is never sent to a different provider. A local OpenAI-compatible
+embeddings server that ignores keys still needs a dummy value, for example
+`"sk-no-key-required"`.
+
+The embed settings are also read from environment variables of the same name, which take
+precedence over Django settings. Indexed source chunks are sent to the embeddings provider
+(after redaction), not to Anthropic.
+
 ### A note on API keys and 401s
 
 `explain_errors` reads `OPENAI_API_KEY` (see Configuration above); it does not read
@@ -344,6 +379,10 @@ also retrieves the most relevant chunks of your own project's source code
 from a local vector index and includes them in the prompt, so explanations
 can reference your actual functions and classes instead of guessing at them.
 
+RAG needs a provider with an embeddings endpoint. Anthropic's OpenAI-compatible API has
+none, so Claude users must configure a separate embeddings provider; see
+[RAG does not work with Anthropic alone](#rag-does-not-work-with-anthropic-alone).
+
 Recommended for most projects. It is opt-in only because setup takes three
 steps (install the extra, build the index, enable it), and it adds no
 dependencies or behavior until you do.
@@ -390,6 +429,8 @@ EXPLAIN_ERRORS_RAG_ENABLED = True
 | `EXPLAIN_ERRORS_RAG_INDEX_PATH` | `<BASE_DIR>/.explain_errors_index.db` | Path to the local vector index file. |
 | `EXPLAIN_ERRORS_RAG_TOP_K` | `4` | Number of chunks retrieved and injected into the prompt. |
 | `EXPLAIN_ERRORS_RAG_EMBED_MODEL` | `"text-embedding-3-small"` | Embedding model used for indexing and retrieval. Must exist on the configured endpoint. |
+| `EXPLAIN_ERRORS_RAG_EMBED_BASE_URL` | chat `OPENAI_BASE_URL` | Base URL of the embeddings provider. Also read from the environment. Set it when chat and embeddings use different providers (see the Anthropic section). |
+| `EXPLAIN_ERRORS_RAG_EMBED_API_KEY` | chat `OPENAI_API_KEY` | Key for the embeddings provider. Also read from the environment. Required when the embed base URL differs from the chat one. |
 | `EXPLAIN_ERRORS_RAG_INCLUDE` | `None` (defaults to `BASE_DIR`) | List of directories to index. |
 | `EXPLAIN_ERRORS_RAG_EXCLUDE` | migrations, venvs, `node_modules`, static, media, `.git` | Directory names to skip while indexing. |
 | `EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS` | `6000` | Combined character budget for the traceback + retrieved source sections of the prompt. |
