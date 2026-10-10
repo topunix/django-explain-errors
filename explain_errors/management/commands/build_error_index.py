@@ -1,5 +1,7 @@
+from django.core.exceptions import ImproperlyConfigured
 from django.core.management.base import BaseCommand, CommandError
 
+from explain_errors.client import EmbeddingsNotSupportedError
 from explain_errors.rag.indexer import build_index
 
 
@@ -15,6 +17,8 @@ class Command(BaseCommand):
 
         try:
             result = build_index()
+        except (EmbeddingsNotSupportedError, ImproperlyConfigured) as exc:
+            raise CommandError(f"{exc} Index not built.") from exc
         except OpenAIError as exc:
             code = getattr(exc, "code", None) or type(exc).__name__
             raise CommandError(

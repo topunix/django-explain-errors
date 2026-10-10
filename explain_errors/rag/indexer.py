@@ -5,7 +5,7 @@ import os
 
 from django.conf import settings
 
-from ..client import get_openai_client
+from ..client import create_embeddings, get_embeddings_client
 from ..sanitize import sanitize_traceback
 from .store import VectorStore
 
@@ -132,7 +132,7 @@ def _embed_texts(client, model, texts):
     embeddings = []
     for i in range(0, len(texts), EMBED_BATCH_SIZE):
         batch = texts[i:i + EMBED_BATCH_SIZE]
-        response = client.embeddings.create(model=model, input=batch)
+        response = create_embeddings(client, model, batch)
         embeddings.extend(item.embedding for item in response.data)
     return embeddings
 
@@ -160,7 +160,7 @@ def build_index():
 
     embeddings = []
     if sanitized_texts:
-        client = get_openai_client()
+        client = get_embeddings_client()
         embeddings = _embed_texts(client, embed_model, sanitized_texts)
 
     tmp_path = f"{index_path}.tmp-{os.getpid()}"

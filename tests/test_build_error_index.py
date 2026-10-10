@@ -72,3 +72,24 @@ class BuildErrorIndexCommandTest(SimpleTestCase):
         mock_build.side_effect = ValueError("EXPLAIN_ERRORS_RAG_INCLUDE is not set")
         with self.assertRaises(ValueError):
             call_command("build_error_index")
+
+
+class BuildErrorIndexEmbeddingsNotSupportedTest(SimpleTestCase):
+
+    @patch("explain_errors.management.commands.build_error_index.build_index")
+    def test_embeddings_not_supported_becomes_command_error(self, mock_build):
+        from explain_errors.client import EmbeddingsNotSupportedError
+
+        mock_build.side_effect = EmbeddingsNotSupportedError("no embeddings here.")
+        with self.assertRaises(CommandError) as ctx:
+            call_command("build_error_index", stdout=StringIO())
+        self.assertIn("no embeddings here.", str(ctx.exception))
+
+    @patch("explain_errors.management.commands.build_error_index.build_index")
+    def test_improperly_configured_becomes_command_error(self, mock_build):
+        from django.core.exceptions import ImproperlyConfigured
+
+        mock_build.side_effect = ImproperlyConfigured("set EXPLAIN_ERRORS_RAG_EMBED_API_KEY")
+        with self.assertRaises(CommandError) as ctx:
+            call_command("build_error_index", stdout=StringIO())
+        self.assertIn("EXPLAIN_ERRORS_RAG_EMBED_API_KEY", str(ctx.exception))
