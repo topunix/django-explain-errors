@@ -218,14 +218,6 @@ Sequencing below follows from that.
   would also cover this case.
   Verify: the README's Anthropic section states whether RAG works with it.
 
-- **debug-toolbar-with-banner**: the Compatibility table's Django Debug
-  Toolbar row was verified empirically before debug page injection existed.
-  Re-verify the toolbar with the banner present, on Django 4.2 and the
-  newest supported version, and update the row and the "verified
-  empirically" sentence to say so.
-  Verify: the Compatibility section states the Debug Toolbar row was
-  verified with the explanation banner present.
-
 - **README restructure**: move the "Debug page injection" section up, next to
   Usage, and trim Usage step 2, which repeats it; reduce "Async Support" to
   one line in Features; group the Configuration table by purpose (provider,

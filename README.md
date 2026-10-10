@@ -200,16 +200,14 @@ preserve mode and with `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False`:
 
 | Package | Preserve mode (default) | `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False` |
 | ------- | ------------------------ | ------------------------------------------- |
-| Django Debug Toolbar | Works — Django renders its debug page (with the explanation banner, unless `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE = False`), and Debug Toolbar injects into it. | Broken — the JSON 500 response has no HTML to inject into. |
+| Django Debug Toolbar | Works. Django renders its debug page (with the explanation banner, unless `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE = False`), and Debug Toolbar injects into it. Verified with the banner present, with the toolbar middleware before or after this one, on WSGI and ASGI. | Broken. The JSON 500 response has no HTML to inject into. |
 | Sentry, Rollbar | Work — the exception propagates and Django re-raises it, so `got_request_exception` fires. | Broken — returning a response ends exception handling before `got_request_exception` fires. |
 | Django REST Framework | Partial — only exceptions DRF does not already handle itself reach this middleware. | Partial, same reason. |
 | Silk and other profiling panels | Timings are inflated by the model API call, since `process_exception` blocks the request path. | Same. |
 | CORS, GZip, WhiteNoise | No interaction. | No interaction. |
 | `runserver_plus` / Werkzeug debugger | Works — returning `None` re-raises the original exception, and `django-extensions` replaces Django's debug-page renderer with one that re-raises instead, so Werkzeug's WSGI wrapper catches it and shows the interactive debugger. | Broken — the JSON 500 response ends exception handling before it reaches `runserver_plus`'s exception hook, so the Werkzeug debugger never appears. |
 
-Debug Toolbar, Sentry, and Werkzeug were verified empirically, on both Django 4.2 and Django
-6.1, in both modes. DRF, Silk, and CORS/GZip/WhiteNoise are reasoned from the mechanism
-rather than tested.
+Debug Toolbar, Sentry, and Werkzeug were verified empirically, on both Django 4.2 and Django 6.1, in both modes. The Debug Toolbar check was repeated with the explanation banner present (default preserve mode) on Django 4.2 and 6.1, under WSGI and ASGI, for sync and async views, with the toolbar middleware before and after this one. Both orderings work. Visual layout and toolbar JavaScript behavior were not checked. DRF, Silk, and CORS/GZip/WhiteNoise are reasoned from the mechanism rather than tested.
 
 One additional behavior worth knowing, also verified on both Django versions: when the
 explanation call itself fails (a bad key, a timeout, an unreachable endpoint), a
