@@ -217,7 +217,13 @@ class GetEmbeddingsClientTest(SimpleTestCase):
 
 
 def _client_answering(status, body, base_url):
-    import httpx
+    # openai 3.0 switched its HTTP library from httpx to httpx2, and only
+    # installs the one it uses. Build the mock transport with whichever the
+    # installed openai depends on.
+    try:
+        import httpx2 as httpx
+    except ImportError:
+        import httpx
     from openai import OpenAI
 
     transport = httpx.MockTransport(lambda request: httpx.Response(status, json=body))
