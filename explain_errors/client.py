@@ -1,5 +1,7 @@
 import os
+import threading
 
+from types import SimpleNamespace
 from urllib.parse import urlparse
 
 from django.conf import settings
@@ -7,6 +9,12 @@ from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv, find_dotenv
 
 PLACEHOLDER_API_KEY = "sk-no-key-required"
+
+BACKEND_OPENAI = "openai"
+BACKEND_LOCAL = "local"
+DEFAULT_OPENAI_EMBED_MODEL = "text-embedding-3-small"
+DEFAULT_LOCAL_EMBED_MODEL = "all-MiniLM-L6-v2"
+LOCAL_EXTRA_INSTALL = "pip install django-explain-errors[local-embeddings]"
 
 
 def _chat_base_url():
@@ -64,6 +72,93 @@ def get_embed_base_url():
     return _embed_setting("EXPLAIN_ERRORS_RAG_EMBED_BASE_URL") or _chat_base_url()
 
 
+def get_embed_backend():
+    """Embeddings backend: EXPLAIN_ERRORS_RAG_EMBED_BACKEND (env var, then
+    Django settings), "openai" (default) or "local"."""
+    load_dotenv(find_dotenv(usecwd=True))
+    value = _embed_setting("EXPLAIN_ERRORS_RAG_EMBED_BACKEND")
+    if value is None:
+        return BACKEND_OPENAI
+    backend = str(value).strip().lower()
+    if backend not in (BACKEND_OPENAI, BACKEND_LOCAL):
+        raise ImproperlyConfigured(
+            f"EXPLAIN_ERRORS_RAG_EMBED_BACKEND must be "
+            f'"{BACKEND_OPENAI}" or "{BACKEND_LOCAL}", got {value!r}.'
+        )
+    return backend
+
+
+def validate_local_model_name(model):
+    """Reject a leftover OpenAI embedding model name on the local backend."""
+    if str(model).lower().startswith("text-embedding-"):
+        raise ImproperlyConfigured(
+            f"EXPLAIN_ERRORS_RAG_EMBED_MODEL is {model!r}, which is an OpenAI "
+            "embedding model, not a local sentence-transformers model. Unset "
+            "EXPLAIN_ERRORS_RAG_EMBED_MODEL to use the default "
+            f"({DEFAULT_LOCAL_EMBED_MODEL}), or name a local model such as "
+            "all-MiniLM-L6-v2."
+        )
+
+
+_local_models = {}
+_local_models_lock = threading.Lock()
+
+
+def _load_local_model(model):
+    """Load a sentence-transformers model once per process and cache it."""
+    with _local_models_lock:
+        cached = _local_models.get(model)
+        if cached is not None:
+            return cached
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as exc:
+            raise ImproperlyConfigured(
+                "EXPLAIN_ERRORS_RAG_EMBED_BACKEND is 'local' but "
+                f"sentence-transformers is not installed. Run: {LOCAL_EXTRA_INSTALL}"
+            ) from exc
+        try:
+            loaded = SentenceTransformer(model)
+        except Exception as exc:
+            raise ImproperlyConfigured(
+                f"Could not load {model!r} as a local sentence-transformers "
+                "model (not a valid model name, or the download failed). "
+                "Unset EXPLAIN_ERRORS_RAG_EMBED_MODEL to use the default "
+                f"({DEFAULT_LOCAL_EMBED_MODEL}), or name a local model. "
+                f"Cause: {exc}"
+            ) from exc
+        _local_models[model] = loaded
+        return loaded
+
+
+class _LocalEmbeddings:
+    def create(self, model, input):
+        validate_local_model_name(model)
+        st_model = _load_local_model(model)
+        # Unit-normalized, like OpenAI's embeddings, so distances are
+        # comparable across backends.
+        vectors = st_model.encode(
+            list(input), normalize_embeddings=True, show_progress_bar=False
+        )
+        return SimpleNamespace(
+            data=[
+                SimpleNamespace(
+                    embedding=v.tolist() if hasattr(v, "tolist") else list(v)
+                )
+                for v in vectors
+            ]
+        )
+
+
+class LocalEmbeddingsClient:
+    """Duck-types the slice of the OpenAI client that create_embeddings()
+    uses, so the indexer and retriever keep one entry point. Needs no API
+    key or base URL."""
+
+    def __init__(self):
+        self.embeddings = _LocalEmbeddings()
+
+
 def get_embeddings_client(timeout=None):
     """Build the client used by the RAG indexer and retriever.
 
@@ -73,8 +168,13 @@ def get_embeddings_client(timeout=None):
     unset or equals the chat base URL. If the embeddings base URL points
     elsewhere, EXPLAIN_ERRORS_RAG_EMBED_API_KEY is required, so the chat key
     is never sent to a different provider.
+
+    With EXPLAIN_ERRORS_RAG_EMBED_BACKEND = "local" this returns an in-process
+    sentence-transformers client instead; base URL and keys are ignored.
     """
     load_dotenv(find_dotenv(usecwd=True))
+    if get_embed_backend() == BACKEND_LOCAL:
+        return LocalEmbeddingsClient()
     embed_url = _embed_setting("EXPLAIN_ERRORS_RAG_EMBED_BASE_URL")
     embed_key = _embed_setting("EXPLAIN_ERRORS_RAG_EMBED_API_KEY")
     if embed_url and not _same_url(embed_url, _chat_base_url()) and not embed_key:
@@ -112,7 +212,9 @@ def create_embeddings(client, model, texts):
                 "EXPLAIN_ERRORS_RAG_EMBED_BASE_URL, "
                 "EXPLAIN_ERRORS_RAG_EMBED_API_KEY and "
                 "EXPLAIN_ERRORS_RAG_EMBED_MODEL to an OpenAI-compatible "
-                "embeddings provider. For local embeddings see the "
-                "local-embeddings item in docs/roadmap.md."
+                "embeddings provider, or set "
+                'EXPLAIN_ERRORS_RAG_EMBED_BACKEND = "local" to embed '
+                "on this machine with sentence-transformers "
+                f"({LOCAL_EXTRA_INSTALL})."
             ) from exc
         raise

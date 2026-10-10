@@ -12,7 +12,12 @@ from .debug_page import ExplainErrorsExceptionReporter
 from .sanitize import sanitize_traceback
 from .throttle import SlidingWindowThrottle
 from .tracebacks import exception_dedup_key, format_traceback
-from .rag.retriever import format_chunks_for_prompt, retrieve_chunks
+from .rag.retriever import (
+    EmbeddingIndexMismatchError,
+    format_chunks_for_prompt,
+    retrieve_chunks,
+    warn_index_mismatch_once,
+)
 
 DEFAULT_EXCEPTION_REPORTER_PATH = "django.views.debug.ExceptionReporter"
 
@@ -235,6 +240,8 @@ class ExplainErrorsMiddleware:
                 rag_section = format_chunks_for_prompt(chunks, remaining_chars)
                 if rag_section:
                     prompt += f"\n\n{rag_section}"
+            except EmbeddingIndexMismatchError as exc:
+                warn_index_mismatch_once(exc)
             except Exception as exc:
                 logger.warning(
                     "explain_errors: RAG retrieval failed, falling back to "
