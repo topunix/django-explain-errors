@@ -317,6 +317,24 @@ The embed settings are also read from environment variables of the same name, wh
 precedence over Django settings. Indexed source chunks are sent to the embeddings provider
 (after redaction), not to Anthropic.
 
+### No second key: local embeddings
+
+If you would rather not use a second provider, run the embeddings on your own machine
+instead. Chat stays on Anthropic and no embeddings API key is needed:
+
+```python
+# Chat: Anthropic
+OPENAI_BASE_URL = "https://api.anthropic.com/v1/"
+OPENAI_API_KEY = "your_anthropic_api_key_here"
+OPENAI_MODEL = "..."
+
+# Embeddings: on this machine
+EXPLAIN_ERRORS_RAG_ENABLED = True
+EXPLAIN_ERRORS_RAG_EMBED_BACKEND = "local"
+```
+
+See [Local embeddings](#local-embeddings) for the install command and what to expect.
+
 ### A note on API keys and 401s
 
 `explain_errors` reads `OPENAI_API_KEY` (see Configuration above); it does not read
@@ -380,7 +398,8 @@ from a local vector index and includes them in the prompt, so explanations
 can reference your actual functions and classes instead of guessing at them.
 
 RAG needs a provider with an embeddings endpoint. Anthropic's OpenAI-compatible API has
-none, so Claude users must configure a separate embeddings provider; see
+none, so Claude users must configure a separate embeddings provider or use
+[local embeddings](#local-embeddings); see
 [RAG does not work with Anthropic alone](#rag-does-not-work-with-anthropic-alone).
 
 Recommended for most projects. It is opt-in only because setup takes three
@@ -428,9 +447,10 @@ EXPLAIN_ERRORS_RAG_ENABLED = True
 | `EXPLAIN_ERRORS_RAG_ENABLED` | `False` | Master switch for the RAG layer. |
 | `EXPLAIN_ERRORS_RAG_INDEX_PATH` | `<BASE_DIR>/.explain_errors_index.db` | Path to the local vector index file. |
 | `EXPLAIN_ERRORS_RAG_TOP_K` | `4` | Number of chunks retrieved and injected into the prompt. |
-| `EXPLAIN_ERRORS_RAG_EMBED_MODEL` | `"text-embedding-3-small"` | Embedding model used for indexing and retrieval. Must exist on the configured endpoint. |
-| `EXPLAIN_ERRORS_RAG_EMBED_BASE_URL` | chat `OPENAI_BASE_URL` | Base URL of the embeddings provider. Also read from the environment. Set it when chat and embeddings use different providers (see the Anthropic section). |
-| `EXPLAIN_ERRORS_RAG_EMBED_API_KEY` | chat `OPENAI_API_KEY` | Key for the embeddings provider. Also read from the environment. Required when the embed base URL differs from the chat one. |
+| `EXPLAIN_ERRORS_RAG_EMBED_BACKEND` | `"openai"` | `"openai"` embeds through an OpenAI-compatible endpoint. `"local"` embeds on this machine with sentence-transformers and needs no API key (see [Local embeddings](#local-embeddings)). Also read from the environment, which takes precedence. |
+| `EXPLAIN_ERRORS_RAG_EMBED_MODEL` | `"text-embedding-3-small"` (`"all-MiniLM-L6-v2"` with the `local` backend) | Embedding model used for indexing and retrieval. Must exist on the configured endpoint, or be a sentence-transformers model name for the `local` backend. |
+| `EXPLAIN_ERRORS_RAG_EMBED_BASE_URL` | chat `OPENAI_BASE_URL` | Base URL of the embeddings provider. Ignored by the `local` backend. Also read from the environment. Set it when chat and embeddings use different providers (see the Anthropic section). |
+| `EXPLAIN_ERRORS_RAG_EMBED_API_KEY` | chat `OPENAI_API_KEY` | Key for the embeddings provider. Ignored by the `local` backend. Also read from the environment. Required when the embed base URL differs from the chat one. |
 | `EXPLAIN_ERRORS_RAG_INCLUDE` | `None` (defaults to `BASE_DIR`) | List of directories to index. |
 | `EXPLAIN_ERRORS_RAG_EXCLUDE` | migrations, venvs, `node_modules`, static, media, `.git` | Directory names to skip while indexing. |
 | `EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS` | `6000` | Combined character budget for the traceback + retrieved source sections of the prompt. |
@@ -446,6 +466,52 @@ retrieval fails for any reason, the middleware logs a warning and falls back
 to the traceback-only prompt. It never breaks error reporting.
 
 RAG-grounded explanations tend to be longer than traceback-only ones. The default `OPENAI_MAX_TOKENS` already leaves generous headroom for this, but if you've lowered it, raise it back up when RAG is enabled so explanations are not truncated.
+
+### Local embeddings
+
+Embeddings can run on your own machine, with no embeddings provider and no second API key.
+This also works with Anthropic for chat (see [Using Anthropic](#using-anthropic-claude-models)).
+
+Install the extra alongside `rag`:
+
+```bash
+pip install django-explain-errors[rag,local-embeddings]
+```
+
+Then set one setting:
+
+```python
+EXPLAIN_ERRORS_RAG_ENABLED = True
+EXPLAIN_ERRORS_RAG_EMBED_BACKEND = "local"
+```
+
+Then build the index as usual with `python manage.py build_error_index`.
+
+What to expect:
+
+- **Install size.** The extra pulls in `sentence-transformers` and PyTorch. With the default
+  PyTorch wheels on Linux that is roughly 1 to 2 GB; a CPU-only PyTorch build is much smaller.
+  The core install and the `rag` extra are unchanged.
+- **First index build.** The default model, `all-MiniLM-L6-v2`, is downloaded the first time
+  it is used (about 90 MB), then cached by `sentence-transformers`. Set
+  `EXPLAIN_ERRORS_RAG_EMBED_MODEL` to use a different sentence-transformers model.
+- **First explanation after server start.** The model is loaded once per process, so the first
+  explanation that uses RAG after the dev server starts pays a one-time load. Later ones do not.
+- **Rebuild the index when you switch.** Vectors from different models are not comparable. The
+  index records its backend, model, and vector size. If the current settings do not match, the
+  middleware logs one warning per process telling you to rerun `build_error_index` and falls
+  back to the traceback-only prompt. It never queries a mismatched index. An index built before
+  this feature existed counts as an `openai` index.
+- **A leftover OpenAI model name.** If `EXPLAIN_ERRORS_RAG_EMBED_MODEL` is still set to an
+  OpenAI model such as `text-embedding-3-small`, the `local` backend raises
+  `ImproperlyConfigured`. Unset it, or name a local model.
+- `EXPLAIN_ERRORS_RAG_EMBED_BASE_URL` and `EXPLAIN_ERRORS_RAG_EMBED_API_KEY` are ignored by the
+  local backend.
+
+**Privacy.** Local embeddings keep indexing and retrieval on your machine: your source is not
+sent to an embeddings API. The traceback and the retrieved source chunks are still sent to the
+chat provider in the prompt, after redaction, unless chat is also local (for example Ollama via
+`OPENAI_BASE_URL`).
 
 ### .gitignore
 
