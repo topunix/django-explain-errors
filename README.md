@@ -52,6 +52,8 @@ better. This package is not trying to compete there.
   including fully local models, so no code has to leave your machine
 - Codebase-aware explanations via RAG over a local sqlite-vec index
   (recommended; see "Codebase-aware explanations" below)
+  - Local embeddings via an optional extra: your codebase is indexed on your machine and never uploaded to an embeddings provider (only the traceback and a few relevant snippets reach your chat model)
+  - Separate embeddings provider config, so Anthropic users can use RAG
 - Explanations in your language via `EXPLAIN_ERRORS_LANGUAGE`, with exception names,
   identifiers, and code kept in English
 - Redacts secrets, tokens, and emails from tracebacks before sending
