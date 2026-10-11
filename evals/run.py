@@ -19,6 +19,7 @@ import subprocess
 import sys
 import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import urlsplit
@@ -410,19 +411,29 @@ def run_all(fixtures, runs):
     return calls, exceptions_by_fixture
 
 
-def judge_all(fixtures, calls, exceptions_by_fixture):
+DEFAULT_JUDGE_CONCURRENCY = 8
+
+
+def judge_all(fixtures, calls, exceptions_by_fixture, concurrency=1, seed=None):
     """Pair up each fixture+run's RAG-off and RAG-on calls and judge them.
-    Returns the list of judgment records.
+    Returns the list of judgment records, in fixture-then-run order whatever
+    `concurrency` is.
+
+    Every comparison's A/B position is drawn from the rng up front, in that
+    order, before any judge call is made. Only the API calls then run
+    concurrently (`concurrency` > 1), so position randomization does not
+    depend on thread scheduling or on N. `concurrency=1` runs the calls
+    inline, one at a time, like the original sequential loop.
     """
     from evals.judge import compare, format_source_section, get_judge_client, get_judge_model
 
     client = get_judge_client()
     model = get_judge_model()
-    rng = random.Random()
+    rng = random.Random(seed)
 
     calls_by_key = {(c["fixture"], c["rag_enabled"], c["run_index"]): c for c in calls}
 
-    judgments = []
+    jobs = []
     for fixture in fixtures:
         source_text = format_source_section(
             _build_judge_source(fixture, exceptions_by_fixture.get(fixture.name))
@@ -431,21 +442,36 @@ def judge_all(fixtures, calls, exceptions_by_fixture):
             {c["run_index"] for c in calls if c["fixture"] == fixture.name}
         )
         for run_index in run_indices:
-            off_call = calls_by_key[(fixture.name, False, run_index)]
-            on_call = calls_by_key[(fixture.name, True, run_index)]
-            judgment = compare(
-                client,
-                model,
-                off_call["traceback"] or "",
-                fixture,
-                source_text,
-                off_call["explanation"],
-                on_call["explanation"],
-                rng=rng,
+            jobs.append(
+                {
+                    "fixture": fixture,
+                    "run_index": run_index,
+                    "source_text": source_text,
+                    "off_call": calls_by_key[(fixture.name, False, run_index)],
+                    "on_call": calls_by_key[(fixture.name, True, run_index)],
+                    "rag_on_is_a": rng.random() < 0.5,
+                }
             )
-            judgment["run_index"] = run_index
-            judgments.append(judgment)
-    return judgments
+
+    def _judge(job):
+        judgment = compare(
+            client,
+            model,
+            job["off_call"]["traceback"] or "",
+            job["fixture"],
+            job["source_text"],
+            job["off_call"]["explanation"],
+            job["on_call"]["explanation"],
+            rag_on_is_a=job["rag_on_is_a"],
+        )
+        judgment["run_index"] = job["run_index"]
+        return judgment
+
+    if concurrency <= 1:
+        return [_judge(job) for job in jobs]
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        # map() yields in submission order, so judgments keep job order.
+        return list(pool.map(_judge, jobs))
 
 
 def tally_judgments(judgments):
@@ -502,6 +528,13 @@ def tally_judgments(judgments):
     }
 
 
+def tally_retries(judgments):
+    """Total judge API retries across all comparisons (each judgment record
+    also carries its own `retries`).
+    """
+    return sum(j.get("retries") or 0 for j in judgments)
+
+
 def tally_latency(calls):
     result = {}
     for label, rag_enabled in (("rag_off", False), ("rag_on", True)):
@@ -555,7 +588,7 @@ def estimate_cost_usd(model, prompt_tokens, completion_tokens):
     ) * pricing["completion"]
 
 
-def print_summary(fixtures, calls, judgments, generator_model, judge_model):
+def print_summary(fixtures, calls, judgments, generator_model, judge_model, timing=None):
     tallied = tally_judgments(judgments)
     latency = tally_latency(calls)
     usage = tally_usage(calls)
@@ -611,6 +644,16 @@ def print_summary(fixtures, calls, judgments, generator_model, judge_model):
         for group in ("A", "B"):
             c = tallied["claim_counts_by_group"][group]
             print(f"  Group {group}: rag_on={c['rag_on']:<4} rag_off={c['rag_off']}")
+
+    if timing is not None:
+        print()
+        print("Wall-clock time by phase:")
+        print(f"  generator: {timing['generator_seconds']:.1f}s (sequential)")
+        print(
+            f"  judge: {timing['judge_seconds']:.1f}s "
+            f"(concurrency {timing['judge_concurrency']}, "
+            f"{tally_retries(judgments)} retries)"
+        )
 
     print()
     print("Latency:")
@@ -673,18 +716,38 @@ def main(argv=None):
         "--runs", type=int, default=1, help="repeat every fixture N times (default 1)"
     )
     parser.add_argument(
-        "--fixture", default=None, help="run only this fixture, by name, for debugging"
+        "--fixture",
+        action="append",
+        default=None,
+        help="run only this fixture, by name, for debugging (repeatable)",
+    )
+    parser.add_argument(
+        "--judge-concurrency",
+        type=int,
+        default=DEFAULT_JUDGE_CONCURRENCY,
+        help="judge comparisons in flight at once (default "
+        f"{DEFAULT_JUDGE_CONCURRENCY}; 1 judges one at a time). The generator "
+        "phase is always sequential.",
+    )
+    parser.add_argument(
+        "--seed",
+        type=int,
+        default=None,
+        help="seed the A/B position draws, to make assignments reproducible",
     )
     args = parser.parse_args(argv)
+    if args.judge_concurrency < 1:
+        parser.error("--judge-concurrency must be at least 1")
 
     _setup_django()
 
     from evals.fixtures import FIXTURES, FIXTURES_BY_NAME
 
     if args.fixture is not None:
-        if args.fixture not in FIXTURES_BY_NAME:
-            parser.error(f"no fixture named {args.fixture!r}")
-        fixtures = [FIXTURES_BY_NAME[args.fixture]]
+        for name in args.fixture:
+            if name not in FIXTURES_BY_NAME:
+                parser.error(f"no fixture named {name!r}")
+        fixtures = [FIXTURES_BY_NAME[name] for name in args.fixture]
     else:
         fixtures = FIXTURES
 
@@ -703,10 +766,25 @@ def main(argv=None):
     )
 
     print(f"Running {len(fixtures)} fixture(s) x {args.runs} run(s) x 2 (RAG off/on)...")
+    generator_start = time.perf_counter()
     calls, exceptions_by_fixture = run_all(fixtures, args.runs)
+    generator_seconds = time.perf_counter() - generator_start
 
-    print("Judging...")
-    judgments = judge_all(fixtures, calls, exceptions_by_fixture)
+    print(f"Judging (concurrency {args.judge_concurrency})...")
+    judge_start = time.perf_counter()
+    judgments = judge_all(
+        fixtures,
+        calls,
+        exceptions_by_fixture,
+        concurrency=args.judge_concurrency,
+        seed=args.seed,
+    )
+    judge_seconds = time.perf_counter() - judge_start
+    timing = {
+        "generator_seconds": generator_seconds,
+        "judge_seconds": judge_seconds,
+        "judge_concurrency": args.judge_concurrency,
+    }
 
     from evals.judge import get_judge_model
 
@@ -719,6 +797,9 @@ def main(argv=None):
         "generator_model": generator_model,
         "judge_model": judge_model,
         "runs": args.runs,
+        "seed": args.seed,
+        "timing": timing,
+        "judge_retries_total": tally_retries(judgments),
         "calls": calls,
         "judgments": judgments,
     }
@@ -728,7 +809,7 @@ def main(argv=None):
     out_path.write_text(json.dumps(results, indent=2))
     print(f"\nWrote {out_path}")
 
-    print_summary(fixtures, calls, judgments, generator_model, judge_model)
+    print_summary(fixtures, calls, judgments, generator_model, judge_model, timing)
 
     return out_path
 

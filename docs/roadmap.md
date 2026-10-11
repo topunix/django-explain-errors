@@ -216,20 +216,6 @@ Sequencing below follows from that.
   Verify: README.md has a Requirements line and the "Debug page injection"
   section appears before "Async Support".
 
-- **eval-harness-concurrent-judging**: run the judge phase of `evals/run.py`
-  concurrently (thread pool, `--judge-concurrency N`, default around 8, N=1
-  reproducing today's behavior). Draw each comparison's A/B position from
-  the existing rng up front, in the current order, so position
-  randomization is unchanged, and return judgments in the current order.
-  Keep the generator phase sequential: `_capture_call` patches
-  `explain_errors.middleware.sanitize_traceback` and attaches a handler to
-  the shared `explain_errors` logger, so concurrent calls would mix up
-  captured tracebacks and token usage, and reported generator latency (a
-  number the README cites) would include contention. Record wall-clock time
-  per phase in the results file so the gain is measured, not assumed. Watch
-  for judge-provider rate limits.
-  Verify: `--judge-concurrency` appears in `evals/run.py` on `main`.
-
 - **eval-fix-validity**: a second eval track that asks whether the suggested fix
   works, not just whether the explanation reads better. For each fixture, the
   harness (not the package) turns the explanation's suggested fix into a patch,
