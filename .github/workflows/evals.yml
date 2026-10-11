@@ -28,6 +28,7 @@ jobs:
         with:
           python-version: "3.12"
           cache: pip
+          cache-dependency-path: setup.py
       - name: Install package with rag extra
         run: |
           python -m pip install --upgrade pip
