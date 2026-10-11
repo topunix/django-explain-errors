@@ -43,7 +43,7 @@ better. This package is not trying to compete there.
   exception headline (`EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`, on by default)
 - Codebase-aware explanations via RAG over a local sqlite-vec index
   (recommended; see "Codebase-aware explanations" below)
-  - Local embeddings via an optional extra: your codebase is indexed on your machine and never uploaded to an embeddings provider (only the traceback and a few relevant snippets reach your chat model)
+  - Local embeddings via an optional extra: your codebase is indexed on your machine and never uploaded to an embeddings provider (only the traceback and a few relevant snippets reach your chat model; see [Privacy](#privacy))
   - Separate embeddings provider config, so Anthropic users can use RAG
 - Explains errors using OpenAI out of the box, Anthropic's Claude models, or any other
   OpenAI-compatible endpoint (Ollama, LM Studio, Azure, gateways) via `OPENAI_BASE_URL`,
@@ -56,7 +56,7 @@ better. This package is not trying to compete there.
   (`EXPLAIN_ERRORS_PRINT_STDOUT`, on by default)
 - Optional JSON 500 response instead of the debug page
   (`EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False`)
-- Redacts secrets, tokens, and emails from tracebacks before sending
+- Redacts common secret patterns, tokens, and emails (see [Privacy](#privacy))
 - Rate limits API calls with a configurable sliding window
 - Works with both sync (WSGI) and async (ASGI) views
 - Manages the API key using environment variables
@@ -349,6 +349,133 @@ and rejected, so a missing `OPENAI_API_KEY` shows up as an opaque `401 Unauthori
 than a clear configuration error. If you see a 401 with `OPENAI_BASE_URL` pointed at a remote
 provider, check that `OPENAI_API_KEY` — not a provider-specific variable — is actually set.
 
+## Privacy
+
+This section describes what leaves your machine, when, and to which endpoint. It describes
+this package's behavior only. It makes no claims about what a provider does with data after
+receiving it; check your provider's own terms.
+
+### What is sent to the chat provider
+
+On each error that triggers an explanation, one request goes to the endpoint set by
+`OPENAI_BASE_URL` (OpenAI by default). Its contents:
+
+- A fixed system prompt, plus the language name if `EXPLAIN_ERRORS_LANGUAGE` is set.
+- The traceback: exception type and message, and for each frame the file path, line number,
+  and source line. Library frames are condensed to fit `OPENAI_MAX_TRACEBACK_CHARS`
+  (default 3000), and the result is redacted. Local variable values are not included, but the
+  exception message can contain values.
+- With RAG enabled, up to `EXPLAIN_ERRORS_RAG_TOP_K` (default 4) retrieved code chunks, each
+  under a header with its file path and line range. The traceback and chunks together are
+  capped at `EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS` (default 6000).
+- The model name and token limit as request parameters, and your API key as the credential.
+
+Nothing else is added: not the request path, headers, body, session, or user, and not your
+Django settings. The request object is never passed to the prompt builder.
+
+Not every error causes a request. A repeat of an already explained error replays the cached
+explanation (`EXPLAIN_ERRORS_DEDUP`, on by default), and calls are limited per worker process
+to 5 per 60 seconds by default.
+
+### What is sent to the embeddings provider
+
+Only when RAG is enabled and the embeddings backend is not `local`:
+
+- **When you run `build_error_index`:** every chunk of every `.py`, `.html`, and `.txt` file
+  under `EXPLAIN_ERRORS_RAG_INCLUDE` (default: `BASE_DIR`), after redaction. Directories named
+  in `EXPLAIN_ERRORS_RAG_EXCLUDE` are skipped. The default is `migrations`, `venv`, `.venv`,
+  `env`, `node_modules`, `static`, `media`, and `.git`. Setting it replaces that list rather
+  than extending it, and it matches directory names only, not individual files. File paths
+  are not part of the embedded text.
+- **On each error (RAG enabled):** a query made of the exception type and message plus about
+  five lines of source on each side of the innermost project frame, after redaction.
+
+The index file itself stays on disk. It holds the redacted chunk text.
+
+### Summary by setup
+
+| Setup | Indexing (your codebase) | Each error (traceback + snippets) |
+|---|---|---|
+| OpenAI chat + OpenAI embeddings | Redacted chunks go to OpenAI embeddings | Query goes to OpenAI embeddings; redacted traceback and retrieved snippets go to OpenAI chat |
+| Anthropic chat + separate embeddings provider | Redacted chunks go to the embeddings provider only, not to Anthropic | Query goes to the embeddings provider; redacted traceback and retrieved snippets go to Anthropic |
+| Any chat + local embeddings | Stays on your machine | Query is embedded locally; redacted traceback and retrieved snippets go to your chat provider |
+| Local chat (e.g. Ollama) + local embeddings | Nothing leaves the machine* | Nothing leaves the machine* |
+| No RAG | Not applicable, no index is built | Redacted traceback goes to your chat provider |
+
+\* Assumes the chat endpoint is genuinely local; the package sends to whatever
+`OPENAI_BASE_URL` points at. The local embedding model is downloaded on first use (see
+[Local embeddings](#local-embeddings)), which transfers the model to you and none of your code.
+
+### Redaction
+
+Before any text is sent or stored, it passes through a regex-based redactor. By default it
+replaces the following with `[REDACTED]` (`EXPLAIN_ERRORS_REDACT_REPLACEMENT`):
+
+- **Secret-like assignments.** A name that starts with `secret`, `password`, `passwd`,
+  `token`, `api_key` (or `apikey`), or `auth`, followed by `=` or `:`, together with its
+  value. The name may continue after the keyword with `_` or `-` and more word characters,
+  or with a capitalized suffix, so `SECRET_KEY`, `AWS_SECRET_ACCESS_KEY`, `secret-key`, and
+  `apiKeyId` all match. A quote after the name is allowed, so dict keys such as
+  `'PASSWORD': 'x'` match. A quoted value is redacted whole, spaces included. Text before the
+  keyword stays: `AWS_SECRET_ACCESS_KEY = "x"` becomes `AWS_[REDACTED]`.
+- **Credentials in URLs.** In `scheme://user:pw@host`, the `user:pw` part. The scheme and
+  host stay.
+- **Known key shapes**, whatever the variable is called: `sk-` (OpenAI, and Anthropic's
+  `sk-ant-`), Stripe `sk_live_` and `sk_test_`, GitHub `ghp_`, `gho_`, `ghu_`, `ghs_`,
+  `ghr_`, and `github_pat_`, Slack `xoxb-`, `xoxa-`, `xoxp-`, `xoxr-`, and `xoxs-`, AWS
+  `AKIA`, and Google `AIza`. Each needs a minimum run of characters after the prefix (for
+  example 20 after `sk-`), so short strings do not match.
+- `Authorization` header values and `Bearer` tokens.
+- Email addresses.
+
+Five Django settings start with a keyword but hold no secret, so they are never redacted:
+`AUTH_USER_MODEL`, `AUTHENTICATION_BACKENDS`, `AUTH_PASSWORD_VALIDATORS`, `PASSWORD_HASHERS`,
+and `PASSWORD_RESET_TIMEOUT`. The match is on the exact name.
+
+It is applied to the traceback (after truncation), to the RAG query text, and to every chunk
+at index time, before the chunk is embedded or written to the index. It is not applied to file
+paths, which appear in tracebacks and in chunk headers.
+
+Add your own regexes with `EXPLAIN_ERRORS_REDACT_PATTERNS`. They run after the defaults.
+`EXPLAIN_ERRORS_REDACT_DISABLE_DEFAULTS = True` turns the defaults off.
+
+**Limits.** This is pattern matching, not a secret scanner. Treat it as a safety net.
+
+- A secret is only caught if its name contains one of the keywords above or its value has a
+  known shape. A bare `key`, `private_key`, or `credentials` is not redacted, so
+  `private_key = "abc123"` passes through. A bare `key` is left alone on purpose, because redacting it
+  would also hide ordinary code such as dict keys and cache keys.
+- Keys with an unknown prefix, or shorter than the length each shape requires, are not
+  caught unless the name matches.
+- An unquoted value with spaces is redacted up to the first space only, and a value that
+  spans lines (a triple-quoted string, a PEM block) is not redacted past its first line.
+- Some harmless names are redacted too. Any name that starts with a keyword followed by `_`,
+  `-`, or a capital letter matches, so `token_count` and `PASSWORD_FIELD` lose their values
+  even though they are not secrets. Names that only begin with the same letters, such as
+  `author`, `authors`, and `tokenizer`, are left alone.
+- Names, IP addresses, phone numbers, other personal data, and file paths (which can contain
+  your username) are not redacted. Neither are values inside exception messages unless a
+  pattern happens to match them.
+- `settings.py` normally sits under `BASE_DIR`, so it is indexed by default. Its
+  `SECRET_KEY` and `DATABASES` password are caught, but a secret stored under a name with no
+  keyword may not be. Add a pattern for your own naming, for example
+  `EXPLAIN_ERRORS_REDACT_PATTERNS = [r"(?i)(?:private_key|credentials)\w*\s*=\s*\S+"]`, leave
+  the settings directory out of `EXPLAIN_ERRORS_RAG_INCLUDE`, or use local embeddings.
+
+### DEBUG only
+
+The middleware does nothing when `DEBUG` is `False`: no client is created and no request is
+made. One thing is not tied to `DEBUG`: `manage.py build_error_index` is a command, so it
+sends chunks to a non-local embeddings provider whenever you run it. For keeping the
+middleware out of production, see [Production Safety](#production-safety).
+
+### Telemetry
+
+This package's own code contains no telemetry or analytics and makes no network requests
+other than to the chat and embeddings endpoints you configure. Nothing is sent to the
+maintainer. Its dependencies (`openai`, and optionally `sqlite-vec` and
+`sentence-transformers`) are separate projects and are not covered by this statement.
+
 ## Explanation language
 
 By default, explanations are written in English. Set `EXPLAIN_ERRORS_LANGUAGE` to
@@ -511,10 +638,8 @@ What to expect:
 - `EXPLAIN_ERRORS_RAG_EMBED_BASE_URL` and `EXPLAIN_ERRORS_RAG_EMBED_API_KEY` are ignored by the
   local backend.
 
-**Privacy.** Local embeddings keep indexing and retrieval on your machine: your source is not
-sent to an embeddings API. The traceback and the retrieved source chunks are still sent to the
-chat provider in the prompt, after redaction, unless chat is also local (for example Ollama via
-`OPENAI_BASE_URL`).
+**Privacy.** Local embeddings keep your source off any embeddings API, but the traceback and
+retrieved snippets still go to your chat provider; see [Privacy](#privacy).
 
 ### .gitignore
 
