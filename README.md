@@ -105,8 +105,9 @@ pip install django-explain-errors
 ## Production Safety
 
 This middleware is intended for local development only. When active, it sends exception
-tracebacks to the configured LLM provider, which may include source code, file paths, and
-local variable values. Keep it out of production.
+tracebacks to the configured LLM provider, which include file paths, the source line of each
+frame, and the exception message (which can contain values). Local variables are not sent.
+Keep it out of production.
 
 **Primary safeguard:** register the middleware only when `DEBUG` is on, or only in your
 development settings module:
