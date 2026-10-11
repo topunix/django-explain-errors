@@ -283,6 +283,7 @@ Sequencing below follows from that.
   not fix line drift.
   Verify: `explain_errors/rag/` on `main` stores per-file hashes at build time and logs a
   stale-index warning at retrieval time.
+  Deferred 2026-10-11 pending the retrieval-arms eval; spec parked on claude/rag-index-staleness-warning-kqm42b (docs/tasks/rag-index-staleness-warning.md).
 
 ## Rejected (recorded so it does not resurface)
 - **Editor extension or MCP server for IDE consumption.** VS Code, PyCharm, and Zed all have
