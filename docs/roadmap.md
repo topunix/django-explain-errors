@@ -284,24 +284,6 @@ Sequencing below follows from that.
   Verify: `explain_errors/rag/` on `main` stores per-file hashes at build time and logs a
   stale-index warning at retrieval time.
 
-- **data-flow-disclosure**: the README does not state what leaves the developer's
-  machine, when, or to whom.
-  Shape: a short README section stating:
-  - at error time, the sanitized traceback and prompt go to the chat endpoint;
-  - with RAG enabled, every indexed chunk (sanitized) goes to the embeddings endpoint at
-    build time, and retrieved chunks are included in the error-time prompt;
-  - pointing `OPENAI_BASE_URL` at a local server (Ollama, LM Studio) keeps all of it on
-    the machine;
-  - the default excluded directories, and how to extend them with
-    `EXPLAIN_ERRORS_RAG_EXCLUDE`;
-  - redaction via `EXPLAIN_ERRORS_REDACT_PATTERNS`.
-  Factual only: describe shipped behavior, no claims about provider retention or training
-  policies.
-  Coordinate with README restructure and README positioning rewrite so the README is not
-  rewritten twice. Small; can land on its own or fold into either.
-  Verify: README.md on `main` has a section describing what data leaves the machine and
-  when.
-
 ## Rejected (recorded so it does not resurface)
 - **Editor extension or MCP server for IDE consumption.** VS Code, PyCharm, and Zed all have
   integrated terminals, so `runserver` output is already inside the editor. The browser, not
