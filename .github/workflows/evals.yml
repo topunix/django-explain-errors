@@ -1,0 +1,115 @@
+name: Evals
+
+on:
+  workflow_dispatch:
+    inputs:
+      runs:
+        description: "Repeat every fixture N times (harness --runs)"
+        type: number
+        default: 3
+      fixture:
+        description: "Run only this fixture by name (harness --fixture). Empty runs all."
+        type: string
+        default: ""
+      seed:
+        description: "Integer seed for A/B position draws (harness --seed). Empty means unseeded."
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install package with rag extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[rag]"
+      - name: Run eval harness
+        env:
+          RUNS: ${{ inputs.runs }}
+          FIXTURE: ${{ inputs.fixture }}
+          SEED: ${{ inputs.seed }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          EVAL_JUDGE_API_KEY: ${{ secrets.EVAL_JUDGE_API_KEY }}
+          EVAL_JUDGE_BASE_URL: ${{ vars.EVAL_JUDGE_BASE_URL }}
+          EVAL_JUDGE_MODEL: ${{ vars.EVAL_JUDGE_MODEL }}
+        run: |
+          if ! [[ "$RUNS" =~ ^[0-9]+$ ]] || [ "$RUNS" -lt 1 ]; then
+            echo "::error::runs must be a positive integer, got '$RUNS'"
+            exit 1
+          fi
+          args=(--runs "$RUNS")
+          if [ -n "$FIXTURE" ]; then
+            args+=(--fixture "$FIXTURE")
+          fi
+          if [ -n "$SEED" ]; then
+            if ! [[ "$SEED" =~ ^-?[0-9]+$ ]]; then
+              echo "::error::seed must be an integer, got '$SEED'"
+              exit 1
+            fi
+            args+=(--seed "$SEED")
+          fi
+          python evals/run.py "${args[@]}"
+      - name: Write summary
+        if: always()
+        run: |
+          python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
+          import glob, json, os, statistics
+
+          files = sorted(glob.glob("evals/results/*.json"))
+          if not files:
+              print("No results file was written.")
+              raise SystemExit(0)
+          path = files[-1]
+          data = json.load(open(path))
+          judgments = data["judgments"]
+          failed = sum(1 for j in judgments if j["judge_failure"])
+          print("## Eval results")
+          print()
+          print(f"- File: `{os.path.basename(path)}`")
+          print(f"- Git SHA: `{data['git_sha']}`")
+          print(f"- Generator: `{data['generator_model']}`")
+          print(f"- Judge: `{data['judge_model']}`")
+          print(f"- Runs: {data['runs']}, seed: {data['seed']}")
+          print(f"- Judge failures: {failed} of {len(judgments)}")
+          print(f"- Judge retries: {data['judge_retries_total']}")
+          t = data["timing"]
+          print(
+              f"- Wall clock: generator {t['generator_seconds']:.1f}s, "
+              f"judge {t['judge_seconds']:.1f}s"
+          )
+          print()
+          print("| Group | RAG-on wins | RAG-off wins | Ties |")
+          print("|---|---|---|---|")
+          for g in ("A", "B"):
+              s = [j["winner_side"] for j in judgments
+                   if j["group"] == g and not j["judge_failure"]]
+              print(f"| {g} | {s.count('rag_on')} | {s.count('rag_off')} | {s.count('tie')} |")
+          print()
+          print("| Side | Mean latency (s) | p50 latency (s) | Calls |")
+          print("|---|---|---|---|")
+          for label, flag in (("RAG-off", False), ("RAG-on", True)):
+              xs = [c["latency_seconds"] for c in data["calls"]
+                    if c["rag_enabled"] == flag]
+              if xs:
+                  print(f"| {label} | {statistics.mean(xs):.2f} | "
+                        f"{statistics.median(xs):.2f} | {len(xs)} |")
+          print()
+          print("CI latency is not comparable with local runs.")
+          PY
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-results
+          path: evals/results/*.json
+          if-no-files-found: error
+          retention-days: 90
