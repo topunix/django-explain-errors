@@ -24,7 +24,24 @@ _KEY_SHAPES = (
     r"AIza[0-9A-Za-z_-]{35}",
 )
 
+# Well-known Django settings whose names start with a keyword but whose
+# values are not secrets. They are matched first, as a whole name, and left
+# untouched. Exact names only (case-sensitive): AUTH_USER_MODEL_X is not
+# covered. Keep this list short; anything else starting with a keyword is
+# still redacted (token_count, PASSWORD_FIELD, ...).
+_SAFE_SETTING_NAMES = (
+    "AUTH_USER_MODEL",
+    "AUTHENTICATION_BACKENDS",
+    "AUTH_PASSWORD_VALIDATORS",
+    "PASSWORD_HASHERS",
+    "PASSWORD_RESET_TIMEOUT",
+)
+
 _DEFAULT_PATTERNS = [
+    # Allowlisted names (group "safe") come first so the keyword rule below
+    # cannot start matching inside them, e.g. at PASSWORD in
+    # AUTH_PASSWORD_VALIDATORS. sanitize_traceback keeps these as they are.
+    r"(?P<safe>\b(?:" + "|".join(_SAFE_SETTING_NAMES) + r")\b)|"
     # Keyword, then an optional continuation of the name (SECRET_KEY,
     # AWS_SECRET_ACCESS_KEY, secret-key, apiKeyId), an optional closing quote
     # (a dict key like 'PASSWORD'), then = or : and the value. The
@@ -39,6 +56,9 @@ _DEFAULT_PATTERNS = [
     r"(?i)\bbearer\s+[A-Za-z0-9._~+/=-]{8,}",
     # Credentials in a URL: scheme://user:pw@host redacts "user:pw". Must run
     # before the email pattern, which would otherwise match "pw@host.tld".
+    # Edge case: a custom EXPLAIN_ERRORS_REDACT_REPLACEMENT without brackets
+    # (e.g. "***") can then match the email pattern as "***@host" and redact
+    # the host too.
     r"(?<=://)[^\s:/@'\"]+:[^\s/@'\"]*(?=@)",
     # API key shapes, regardless of variable name.
     r"(?<![A-Za-z0-9])(?:" + "|".join(_KEY_SHAPES) + r")",
@@ -74,7 +94,12 @@ def sanitize_traceback(tb: str) -> str:
 
     replacement = getattr(settings, "EXPLAIN_ERRORS_REDACT_REPLACEMENT", "[REDACTED]")
 
+    def redact(match):
+        if match.groupdict().get("safe"):
+            return match.group(0)
+        return match.expand(replacement)
+
     for pattern in _compiled_patterns():
-        tb = pattern.sub(replacement, tb)
+        tb = pattern.sub(redact, tb)
 
     return tb

@@ -131,6 +131,50 @@ class SanitizeNoOverRedactionTest(SimpleTestCase):
         self.assertUnchanged("task-queue-worker-configuration-long")
 
 
+class SanitizeSafeSettingNamesTest(SimpleTestCase):
+
+    SAFE_LINES = {
+        "AUTH_USER_MODEL": 'AUTH_USER_MODEL = "accounts.User"',
+        "AUTHENTICATION_BACKENDS": 'AUTHENTICATION_BACKENDS = ["django.contrib.auth.backends.ModelBackend"]',
+        "AUTH_PASSWORD_VALIDATORS": "AUTH_PASSWORD_VALIDATORS = [",
+        "PASSWORD_HASHERS": 'PASSWORD_HASHERS = ["django.contrib.auth.hashers.Argon2PasswordHasher"]',
+        "PASSWORD_RESET_TIMEOUT": "PASSWORD_RESET_TIMEOUT = 3600",
+    }
+
+    def test_allowlisted_settings_left_alone(self):
+        for name, line in self.SAFE_LINES.items():
+            with self.subTest(name=name):
+                self.assertEqual(sanitize_traceback(line), line)
+
+    def test_allowlisted_names_left_alone_in_other_forms(self):
+        for text in (
+            "settings.PASSWORD_HASHERS = []",
+            "'AUTH_USER_MODEL': 'accounts.User',",
+            "AttributeError: 'Settings' has no AUTH_PASSWORD_VALIDATORS",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(sanitize_traceback(text), text)
+
+    def test_secrets_next_to_allowlisted_names_still_redacted(self):
+        result = sanitize_traceback('PASSWORD_HASHERS = []; password = "hunter2"')
+        self.assertIn("PASSWORD_HASHERS = []", result)
+        self.assertNotIn("hunter2", result)
+
+    def test_allowlist_is_exact_names_only(self):
+        for text in ('AUTH_USER_MODEL_X = "abc123"', 'MY_PASSWORD_HASHERS = "abc123"'):
+            with self.subTest(text=text):
+                self.assertNotIn("abc123", sanitize_traceback(text))
+
+    def test_secret_key_and_quoted_password_still_redacted(self):
+        self.assertEqual(sanitize_traceback('SECRET_KEY = "abc123"'), "[REDACTED]")
+        result = sanitize_traceback("'PASSWORD': 'x',")
+        self.assertIn("[REDACTED]", result)
+        self.assertNotIn("'x'", result)
+
+    def test_token_count_style_names_still_redacted(self):
+        self.assertIn("[REDACTED]", sanitize_traceback("token_count = 5"))
+
+
 class SanitizeSettingsTest(SimpleTestCase):
 
     @override_settings(EXPLAIN_ERRORS_REDACT_PATTERNS=[r"CUSTOM-\d+"])
