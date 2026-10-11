@@ -17,6 +17,7 @@ position bias can't leak into the win counts.
 import json
 import random
 import re
+import time
 
 QUESTION_KEYS = (
     "identifies_cause",
@@ -161,7 +162,10 @@ def get_judge_client():
             "EVAL_JUDGE_API_KEY is not set. The judge intentionally never "
             "reuses the generator's OPENAI_API_KEY."
         )
-    kwargs = {"api_key": api_key}
+    # max_retries=0: retries are done by `_create_with_retry` below, so each
+    # one is counted and recorded in the results file. The SDK's own hidden
+    # retries would make the recorded count understate what happened.
+    kwargs = {"api_key": api_key, "max_retries": 0}
     base_url = os.environ.get("EVAL_JUDGE_BASE_URL")
     if base_url:
         kwargs["base_url"] = base_url
@@ -175,6 +179,57 @@ def get_judge_model():
     if not model:
         raise ValueError("EVAL_JUDGE_MODEL is not set.")
     return model
+
+
+# Retry policy for the judge API call itself (not for malformed responses,
+# which stay judge failures: a retry would just roll the nondeterministic
+# judge again). Exponential backoff with full jitter, capped attempts.
+MAX_ATTEMPTS = 5
+BACKOFF_BASE_SECONDS = 1.0
+BACKOFF_MAX_SECONDS = 30.0
+
+# Jitter must never touch the position rng passed to `compare`: drawing from
+# it would shift every later A/B assignment depending on how many retries
+# happened to occur.
+_jitter_rng = random.Random()
+
+
+def _is_retryable(exc):
+    """Rate limits, timeouts, dropped connections, and 5xx. Anything else
+    (bad key, bad request, malformed response) fails immediately.
+    """
+    import openai
+
+    if isinstance(
+        exc,
+        (openai.RateLimitError, openai.APITimeoutError, openai.APIConnectionError),
+    ):
+        return True
+    status = getattr(exc, "status_code", None)
+    return isinstance(exc, openai.APIStatusError) and (
+        status in (408, 409, 429) or (status is not None and status >= 500)
+    )
+
+
+def _create_with_retry(client, model, prompt, max_attempts, sleep):
+    """Call the judge. Returns (response, retries). On exhaustion, raises
+    the last error with `.retries` set to the retries spent.
+    """
+    retries = 0
+    while True:
+        try:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+            )
+            return response, retries
+        except Exception as exc:
+            if not _is_retryable(exc) or retries + 1 >= max_attempts:
+                exc.retries = retries
+                raise
+            ceiling = min(BACKOFF_MAX_SECONDS, BACKOFF_BASE_SECONDS * 2**retries)
+            sleep(_jitter_rng.uniform(0, ceiling))
+            retries += 1
 
 
 def format_source_section(sources):
@@ -297,8 +352,17 @@ def compare(
     rag_off_explanation,
     rag_on_explanation,
     rng=None,
+    rag_on_is_a=None,
+    max_attempts=MAX_ATTEMPTS,
+    sleep=time.sleep,
 ):
     """Judge rag_off vs rag_on for one fixture call.
+
+    `rag_on_is_a`, if given, is the A/B assignment already drawn by the
+    caller (evals/run.py draws every position up front, in order, so that
+    concurrent judging can't change them); otherwise it is drawn from `rng`.
+    Transient API errors are retried up to `max_attempts` calls in total;
+    the retries spent land in the result's `retries`, success or failure.
 
     `source_text` (see format_source_section) is the same for both sides of
     this comparison -- it exists so the judge can verify a specific claim
@@ -310,8 +374,9 @@ def compare(
     answers -- or, on any failure to get a well-formed response, a judge
     failure record with the mapping still included.
     """
-    rng = rng if rng is not None else random
-    rag_on_is_a = rng.random() < 0.5
+    if rag_on_is_a is None:
+        rng = rng if rng is not None else random
+        rag_on_is_a = rng.random() < 0.5
     if rag_on_is_a:
         explanation_a, explanation_b = rag_on_explanation, rag_off_explanation
     else:
@@ -323,11 +388,9 @@ def compare(
     # afterward still leaves the tokens that call actually spent on the
     # judge failure record below -- the judge model was paid for either way.
     prompt_tokens = completion_tokens = None
+    retries = 0
     try:
-        response = client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": prompt}],
-        )
+        response, retries = _create_with_retry(client, model, prompt, max_attempts, sleep)
         usage = getattr(response, "usage", None)
         if usage is not None:
             prompt_tokens = usage.prompt_tokens
@@ -347,6 +410,7 @@ def compare(
                     "treating this as a skipped lookup, not a clean pass"
                 )
     except Exception as exc:
+        retries = getattr(exc, "retries", retries)
         return {
             "fixture": fixture.name,
             "group": fixture.group,
@@ -360,6 +424,7 @@ def compare(
             "reasoning": None,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
+            "retries": retries,
         }
 
     winner = parsed["winner"]
@@ -376,4 +441,5 @@ def compare(
         "reasoning": parsed["reasoning"],
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
+        "retries": retries,
     }

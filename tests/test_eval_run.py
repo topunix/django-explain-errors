@@ -8,9 +8,21 @@ import json
 import os
 import subprocess
 import sys
+import random
+import threading
+import time
 import unittest
+from unittest.mock import patch
 
-from evals.run import estimate_cost_usd, tally_judgments, tally_latency, tally_usage
+from evals.fixtures import FIXTURES_BY_NAME
+from evals.run import (
+    estimate_cost_usd,
+    judge_all,
+    tally_judgments,
+    tally_latency,
+    tally_retries,
+    tally_usage,
+)
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -279,6 +291,140 @@ class BuildJudgeSourceTest(unittest.TestCase):
         self.assertFalse(any(label.endswith(".html") for label in labels))
 
 
+class JudgeAllConcurrencyTest(unittest.TestCase):
+    """judge_all with a fake judge: position draws happen up front, in
+    order, independent of concurrency, and results keep job order.
+    """
+
+    FIXTURE_NAMES = ("none_attribute", "str_recursion", "bad_lookup")
+    RUNS = 3
+    SEED = 20260711
+
+    def _calls(self):
+        return [
+            {
+                "fixture": name,
+                "rag_enabled": rag,
+                "run_index": run,
+                "traceback": "tb",
+                "explanation": f"{name}/{rag}/{run}",
+            }
+            for name in self.FIXTURE_NAMES
+            for rag in (False, True)
+            for run in range(self.RUNS)
+        ]
+
+    def _run(self, concurrency, scramble=True):
+        """Returns (judgments, draws_before_first_call, call_order)."""
+        fixtures = [FIXTURES_BY_NAME[n] for n in self.FIXTURE_NAMES]
+        draws = []
+        lock = threading.Lock()
+        state = {"draws_at_first_call": None}
+        call_order = []
+
+        class CountingRandom(random.Random):
+            def random(self):
+                value = super().random()
+                draws.append(value)
+                return value
+
+        def fake_compare(client, model, tb, fixture, source, off, on, rag_on_is_a=None, **kw):
+            with lock:
+                if state["draws_at_first_call"] is None:
+                    state["draws_at_first_call"] = len(draws)
+                call_order.append((fixture.name, off))
+            if scramble:
+                # Finish out of submission order: later jobs return sooner.
+                time.sleep(0.02 if off.endswith("/0") else 0.0)
+            return {
+                "fixture": fixture.name,
+                "run_index": None,
+                "rag_on_is_a": rag_on_is_a,
+                "off": off,
+                "on": on,
+                "retries": 0,
+            }
+
+        with patch("evals.judge.get_judge_client", return_value=object()), patch(
+            "evals.judge.get_judge_model", return_value="m"
+        ), patch("evals.judge.compare", side_effect=fake_compare), patch(
+            "evals.run._build_judge_source", return_value=[]
+        ), patch("evals.run.random.Random", CountingRandom):
+            judgments = judge_all(
+                fixtures, self._calls(), {}, concurrency=concurrency, seed=self.SEED
+            )
+        return judgments, state["draws_at_first_call"], call_order
+
+    def test_all_draws_happen_before_the_first_judge_call(self):
+        total = len(self.FIXTURE_NAMES) * self.RUNS
+        for n in (1, 4, 8):
+            _, draws_at_first_call, _ = self._run(n)
+            self.assertEqual(draws_at_first_call, total, f"N={n}")
+
+    def test_positions_match_the_seeded_rng_in_fixture_then_run_order(self):
+        reference = random.Random(self.SEED)
+        expected = [
+            reference.random() < 0.5
+            for _ in range(len(self.FIXTURE_NAMES) * self.RUNS)
+        ]
+        for n in (1, 2, 8, 32):
+            judgments, _, _ = self._run(n)
+            self.assertEqual([j["rag_on_is_a"] for j in judgments], expected, f"N={n}")
+
+    def test_results_keep_comparison_order_even_when_completion_order_differs(self):
+        expected_order = [
+            (name, run) for name in self.FIXTURE_NAMES for run in range(self.RUNS)
+        ]
+        for n in (1, 8):
+            judgments, _, _ = self._run(n)
+            self.assertEqual(
+                [(j["fixture"], j["run_index"]) for j in judgments], expected_order, f"N={n}"
+            )
+            self.assertEqual(
+                [j["off"] for j in judgments],
+                [f"{name}/False/{run}" for name, run in expected_order],
+            )
+
+    def test_concurrency_one_calls_in_order(self):
+        _, _, call_order = self._run(1)
+        self.assertEqual(
+            [name for name, _ in call_order],
+            [name for name in self.FIXTURE_NAMES for _ in range(self.RUNS)],
+        )
+
+    def test_concurrency_actually_overlaps_calls(self):
+        active = {"now": 0, "peak": 0}
+        lock = threading.Lock()
+
+        def fake_compare(*args, **kwargs):
+            with lock:
+                active["now"] += 1
+                active["peak"] = max(active["peak"], active["now"])
+            time.sleep(0.05)
+            with lock:
+                active["now"] -= 1
+            return {"fixture": "x", "retries": 0}
+
+        fixtures = [FIXTURES_BY_NAME[n] for n in self.FIXTURE_NAMES]
+        with patch("evals.judge.get_judge_client", return_value=object()), patch(
+            "evals.judge.get_judge_model", return_value="m"
+        ), patch("evals.judge.compare", side_effect=fake_compare), patch(
+            "evals.run._build_judge_source", return_value=[]
+        ):
+            judge_all(fixtures, self._calls(), {}, concurrency=4, seed=1)
+        self.assertGreater(active["peak"], 1)
+        self.assertLessEqual(active["peak"], 4)
+
+
+class TallyRetriesTest(unittest.TestCase):
+
+    def test_sums_per_judgment_retries_and_tolerates_missing(self):
+        self.assertEqual(
+            tally_retries([{"retries": 2}, {"retries": 0}, {}, {"retries": None}, {"retries": 1}]),
+            3,
+        )
+
+
 class EvalHarnessEndToEndTest(unittest.TestCase):
     """Runs evals.run.main() in a subprocess with the generator (chat +
     embeddings) and the judge fully mocked
@@ -326,10 +472,17 @@ class EvalHarnessEndToEndTest(unittest.TestCase):
             "generator_model",
             "judge_model",
             "runs",
+            "seed",
+            "timing",
+            "judge_retries_total",
             "calls",
             "judgments",
         ):
             self.assertIn(key, data)
+        self.assertEqual(data["judge_retries_total"], 0)
+        self.assertEqual(data["timing"]["judge_concurrency"], 8)
+        self.assertGreaterEqual(data["timing"]["generator_seconds"], 0)
+        self.assertGreaterEqual(data["timing"]["judge_seconds"], 0)
 
         self.assertEqual(data["generator_model"], "gpt-4o-mini")
         self.assertEqual(data["judge_model"], "judge-test-model")
@@ -369,6 +522,7 @@ class EvalHarnessEndToEndTest(unittest.TestCase):
             "b",
             "reasoning",
             "run_index",
+            "retries",
         }
         for judgment in data["judgments"]:
             self.assertTrue(judgment_keys.issubset(judgment.keys()), judgment)

@@ -391,3 +391,161 @@ class CompareClaimsGuardTest(unittest.TestCase):
         )
 
         self.assertFalse(result["judge_failure"])
+
+
+def _openai_error(cls, status=None):
+    """An instance of the openai exception class without constructing its
+    httpx request/response (which httpx package openai imports varies by
+    openai version).
+    """
+    exc = Exception.__new__(cls)
+    exc.args = ("boom",)
+    if status is not None:
+        exc.status_code = status
+    return exc
+
+
+def _flaky_client(errors, then=VALID_RESPONSE):
+    """Raises each of `errors` in turn, then returns `then`."""
+    client = MagicMock()
+    ok = MagicMock(
+        choices=[MagicMock(message=MagicMock(content=then))],
+        usage=MagicMock(prompt_tokens=7, completion_tokens=3),
+    )
+    client.chat.completions.create.side_effect = list(errors) + [ok]
+    return client
+
+
+class CompareRetryTest(unittest.TestCase):
+
+    def test_pre_drawn_position_is_used_and_rng_untouched(self):
+        fixture = _make_fixture()
+        client = _client_returning(VALID_RESPONSE)
+
+        class ExplodingRng:
+            def random(self):
+                raise AssertionError("rng must not be drawn when rag_on_is_a is given")
+
+        result = compare(
+            client, "m", "tb", fixture, "src", "off", "on",
+            rng=ExplodingRng(), rag_on_is_a=False,
+        )
+
+        self.assertFalse(result["rag_on_is_a"])
+
+    def test_rate_limit_is_retried_and_counted(self):
+        import openai
+
+        fixture = _make_fixture()
+        errors = [_openai_error(openai.RateLimitError, 429)] * 2
+        client = _flaky_client(errors)
+        sleeps = []
+
+        result = compare(
+            client, "m", "tb", fixture, "src", "off", "on",
+            rng=_FixedRng(0.1), sleep=sleeps.append,
+        )
+
+        self.assertFalse(result["judge_failure"])
+        self.assertEqual(result["retries"], 2)
+        self.assertEqual(len(sleeps), 2)
+        self.assertEqual(client.chat.completions.create.call_count, 3)
+        self.assertEqual(result["prompt_tokens"], 7)
+
+    def test_backoff_grows_and_is_capped(self):
+        import openai
+
+        from evals import judge
+
+        fixture = _make_fixture()
+        client = _flaky_client([_openai_error(openai.InternalServerError, 503)] * 4)
+        ceilings = []
+
+        class RecordingJitter:
+            def uniform(self, low, high):
+                ceilings.append(high)
+                return high
+
+        original = judge._jitter_rng
+        judge._jitter_rng = RecordingJitter()
+        self.addCleanup(setattr, judge, "_jitter_rng", original)
+
+        compare(
+            client, "m", "tb", fixture, "src", "off", "on",
+            rng=_FixedRng(0.1), max_attempts=5, sleep=lambda s: None,
+        )
+
+        self.assertEqual(ceilings, [1.0, 2.0, 4.0, 8.0])
+
+    def test_timeout_and_connection_errors_are_retried(self):
+        import openai
+
+        fixture = _make_fixture()
+        client = _flaky_client(
+            [_openai_error(openai.APITimeoutError), _openai_error(openai.APIConnectionError)]
+        )
+
+        result = compare(
+            client, "m", "tb", fixture, "src", "off", "on",
+            rng=_FixedRng(0.1), sleep=lambda s: None,
+        )
+
+        self.assertFalse(result["judge_failure"])
+        self.assertEqual(result["retries"], 2)
+
+    def test_exhausted_retries_is_a_judge_failure_with_retries_recorded(self):
+        import openai
+
+        fixture = _make_fixture()
+        client = MagicMock()
+        client.chat.completions.create.side_effect = _openai_error(openai.RateLimitError, 429)
+
+        result = compare(
+            client, "m", "tb", fixture, "src", "off", "on",
+            rng=_FixedRng(0.1), max_attempts=3, sleep=lambda s: None,
+        )
+
+        self.assertTrue(result["judge_failure"])
+        self.assertEqual(result["retries"], 2)
+        self.assertEqual(client.chat.completions.create.call_count, 3)
+        self.assertIn("boom", result["error"])
+        self.assertIn("rag_on_is_a", result)
+
+    def test_non_transient_error_is_not_retried(self):
+        import openai
+
+        fixture = _make_fixture()
+        client = MagicMock()
+        client.chat.completions.create.side_effect = _openai_error(
+            openai.AuthenticationError, 401
+        )
+
+        result = compare(
+            client, "m", "tb", fixture, "src", "off", "on",
+            rng=_FixedRng(0.1), sleep=lambda s: self.fail("must not sleep"),
+        )
+
+        self.assertTrue(result["judge_failure"])
+        self.assertEqual(result["retries"], 0)
+        self.assertEqual(client.chat.completions.create.call_count, 1)
+
+    def test_malformed_response_is_not_retried(self):
+        fixture = _make_fixture()
+        client = _client_returning("not json")
+
+        result = compare(
+            client, "m", "tb", fixture, "src", "off", "on",
+            rng=_FixedRng(0.1), sleep=lambda s: self.fail("must not sleep"),
+        )
+
+        self.assertTrue(result["judge_failure"])
+        self.assertEqual(result["retries"], 0)
+        self.assertEqual(client.chat.completions.create.call_count, 1)
+
+    def test_clean_call_records_zero_retries(self):
+        fixture = _make_fixture()
+        client = _client_returning(VALID_RESPONSE)
+
+        result = compare(client, "m", "tb", fixture, "src", "off", "on", rng=_FixedRng(0.1))
+
+        self.assertEqual(result["retries"], 0)

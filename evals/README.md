@@ -120,7 +120,9 @@ Each run:
 4. Asks the judge to compare the two explanations for each fixture, with
    which one it sees as "A" randomized per comparison.
 5. Writes `evals/results/<timestamp>.json` (git-ignored) with every call,
-   every judgment, the generator and judge model names, and the git SHA.
+   every judgment, the generator and judge model names, the git SHA, the
+   seed, wall-clock seconds per phase (`timing`), and judge retries (per
+   judgment as `retries`, and `judge_retries_total`).
 6. Prints a summary.
 
 ### `--runs N`
@@ -133,7 +135,34 @@ not change what a single call costs.
 ### `--fixture NAME`
 
 Runs only the named fixture (see `evals/fixtures.py` for the list), for
-debugging one failure without paying for the other 14.
+debugging one failure without paying for the other 14. Repeat the flag to
+run a few: `--fixture bad_lookup --fixture missing_fk`.
+
+### `--judge-concurrency N`
+
+Judge comparisons in flight at once (default 8). `1` judges one at a time.
+Only the judge phase is concurrent. The generator phase stays sequential,
+because `_capture_call` patches `explain_errors.middleware.sanitize_traceback`
+and attaches a handler to the shared `explain_errors` logger, and because
+the generator latency numbers would otherwise include contention.
+
+Each comparison's A/B position is drawn from the rng up front, in fixture
+then run order, before any judge call is made, and judgments are returned
+in that same order. Position randomization and result order are therefore
+the same at any N. Verdicts can still differ between runs, since the judge
+is nondeterministic.
+
+Judge calls that hit a rate limit (429), a timeout, a dropped connection,
+or a 5xx are retried with exponential backoff and jitter, up to 5 calls in
+total. A comparison that exhausts its retries is recorded as a judge
+failure. The judge client is built with `max_retries=0`, so every retry is
+done and counted by the harness. If you see retries in the results, lower
+`--judge-concurrency`.
+
+### `--seed N`
+
+Seeds the A/B position draws so two runs assign the same sides. Unset by
+default (positions differ each run).
 
 ## Reading the summary
 
