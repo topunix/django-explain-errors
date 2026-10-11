@@ -236,8 +236,8 @@ developer is actually investigating.
 | `OPENAI_BASE_URL` (env or settings) | No | Base URL for any OpenAI-compatible API (for example Ollama at `http://localhost:11434/v1`). When set, a missing API key is replaced with a placeholder since local servers do not require one. |
 | `EXPLAIN_ERRORS_MAX_CALLS` | No | Together with `EXPLAIN_ERRORS_WINDOW_SECONDS`, caps API spend to at most this many explanations within a rolling window; once the cap is hit, further errors in that window are not sent for explanation until an earlier call ages out. Defaults to `5`. |
 | `EXPLAIN_ERRORS_WINDOW_SECONDS` | No | Length in seconds of the rolling window `EXPLAIN_ERRORS_MAX_CALLS` is measured against. Defaults to `60` (with the defaults, at most 5 explanations per 60-second window). |
-| `EXPLAIN_ERRORS_REDACT_PATTERNS` | No | Extra regex pattern strings (each passed to `re.compile`) applied to the traceback, appended after the built-in secret/token/email patterns. An invalid pattern is skipped with a warning rather than raising. Defaults to `[]`. |
-| `EXPLAIN_ERRORS_REDACT_DISABLE_DEFAULTS` | No | When `True`, skips the built-in secret/token/email redaction patterns entirely and redacts only what `EXPLAIN_ERRORS_REDACT_PATTERNS` specifies. Turning this on removes the default protection against leaking secrets and PII in tracebacks. Defaults to `False`. |
+| `EXPLAIN_ERRORS_REDACT_PATTERNS` | No | Extra regex pattern strings (each passed to `re.compile`) applied to the traceback, the RAG query, and indexed chunks (see [Redaction](#redaction)), appended after the built-in secret/token/email patterns. An invalid pattern is skipped with a warning rather than raising. Defaults to `[]`. |
+| `EXPLAIN_ERRORS_REDACT_DISABLE_DEFAULTS` | No | When `True`, skips the built-in secret/token/email redaction patterns entirely and redacts only what `EXPLAIN_ERRORS_REDACT_PATTERNS` specifies. Turning this on removes the default protection against leaking secrets and PII in tracebacks, RAG queries, and indexed chunks (see [Redaction](#redaction)). Defaults to `False`. |
 | `EXPLAIN_ERRORS_REDACT_REPLACEMENT` | No | Replacement string substituted for anything matched by the redaction patterns. Defaults to `"[REDACTED]"`. |
 | `EXPLAIN_ERRORS_LANGUAGE` | No | Language the explanation prose is written in, as a plain name or code (for example `"Spanish"` or `"es"`). Defaults to `None`, meaning English. Exception names, identifiers, code, file paths, and tracebacks always stay in English regardless of this setting. |
 | `EXPLAIN_ERRORS_DEDUP` | No | When `True` (the default), a repeat of an error already explained in this process replays the earlier explanation instead of calling the model or using a throttle slot. Two errors are identical when they have the same exception type, the same exception message, and the same innermost project line (file, line number, and that line's source text); editing the line makes it a new error. Keeps the last 128 distinct errors per worker (least recently used entries are evicted first) and entries never expire on a timer. Set to `False` to explain every error. |
@@ -556,8 +556,8 @@ python manage.py build_error_index
 ```
 
 This walks your project, chunks Python files by top-level function/class
-(and other text files by fixed-size line windows), embeds each chunk with
-the configured endpoint's embeddings API, and writes them to a local index file. Re-run it
+(and other text files by fixed-size line windows), embeds each chunk through the configured embeddings provider (or on this machine with the
+[local backend](#local-embeddings)), and writes them to a local index file. Re-run it
 whenever your source changes meaningfully. Indexing is not automatic.
 Rebuilding is idempotent: it builds into a temp file and atomically replaces
 the previous index.
@@ -585,11 +585,7 @@ EXPLAIN_ERRORS_RAG_ENABLED = True
 | `EXPLAIN_ERRORS_RAG_EXCLUDE` | migrations, venvs, `node_modules`, static, media, `.git` | Directory names to skip while indexing. |
 | `EXPLAIN_ERRORS_RAG_MAX_PROMPT_CHARS` | `6000` | Combined character budget for the traceback + retrieved source sections of the prompt. |
 
-Every chunk of source code and every retrieval query is passed through the
-same `sanitize_traceback()` redaction used for tracebacks, which strips
-patterns that look like secrets, tokens, and emails before anything is sent to the model API or written to the index. It's a pattern-based filter, not a
-guarantee: it catches recognizable secret shapes, not arbitrary sensitive
-data that doesn't match one.
+Chunks and queries are redacted before they are sent or written to the index; see [Privacy](#privacy) for what is and isn't caught.
 
 If RAG is enabled but the index is missing, `sqlite-vec` isn't installed, or
 retrieval fails for any reason, the middleware logs a warning and falls back
