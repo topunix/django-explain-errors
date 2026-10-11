@@ -164,6 +164,43 @@ done and counted by the harness. If you see retries in the results, lower
 Seeds the A/B position draws so two runs assign the same sides. Unset by
 default (positions differ each run).
 
+## Running in CI
+
+The `Evals` workflow (`.github/workflows/evals.yml`) runs the harness on
+demand. It never runs on push, pull request, or a schedule, because every
+run spends real money.
+
+**Required secrets** (Settings > Secrets and variables > Actions > Secrets):
+
+| Secret | Purpose |
+|---|---|
+| `OPENAI_API_KEY` | generator and embeddings |
+| `EVAL_JUDGE_API_KEY` | judge (for example an OpenRouter key) |
+
+**Required variables** (Settings > Secrets and variables > Actions > Variables):
+
+| Variable | Purpose |
+|---|---|
+| `EVAL_JUDGE_BASE_URL` | judge endpoint, for example `https://openrouter.ai/api/v1` |
+| `EVAL_JUDGE_MODEL` | judge model slug |
+
+**Trigger a run:** Actions tab > Evals > Run workflow, then choose the
+branch and inputs:
+
+| Input | Default | Harness flag |
+|---|---|---|
+| `runs` | `3` | `--runs` |
+| `fixture` | empty (all fixtures) | `--fixture`, passed only when set. One fixture name. |
+| `seed` | empty (unseeded) | `--seed`, passed only when set. Must be an integer. |
+
+**Download results:** open the run page and use the Artifacts section
+(`eval-results`, kept 90 days), or run
+`gh run download <run-id> -n eval-results`. The run page also shows a short
+summary parsed from the results JSON.
+
+CI latency numbers are not comparable with local runs. Hosted runners differ
+in CPU and network path, so compare latency only between CI runs.
+
 ## Reading the summary
 
 Read the win counts **per group**, not just the aggregate. The aggregate
