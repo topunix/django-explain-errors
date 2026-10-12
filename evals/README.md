@@ -170,6 +170,8 @@ The `Evals` workflow (`.github/workflows/evals.yml`) runs the harness on
 demand. It never runs on push, pull request, or a schedule, because every
 run spends real money.
 
+The runner is pinned to `ubuntu-24.04` rather than `ubuntu-latest`, so results stay comparable when `ubuntu-latest` moves to Ubuntu 26 on 2026-10-19.
+
 **Required secrets** (Settings > Secrets and variables > Actions > Secrets):
 
 | Secret | Purpose |
