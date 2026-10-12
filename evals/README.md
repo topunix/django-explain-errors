@@ -162,7 +162,11 @@ done and counted by the harness. If you see retries in the results, lower
 ### `--seed N`
 
 Seeds the A/B position draws so two runs assign the same sides. Unset by
-default (positions differ each run).
+default (positions differ each run). The seed only fixes which explanation
+the judge sees as "A"; generator and judge outputs are still
+nondeterministic, so a seed makes position bias comparable between runs,
+not the verdicts identical. The value used is written to the results JSON
+as `seed` (`null` when unset).
 
 ## Running in CI
 
@@ -222,6 +226,13 @@ one.
 
 Below the win counts:
 
+- **Wall-clock time by phase**: seconds spent in the generator phase
+  (always sequential) and in the judge phase, with the
+  `--judge-concurrency` value used and the total retry count across all
+  judge calls. A nonzero retry count means the judge provider rate limited
+  or timed out; lower `--judge-concurrency` if it is high. This is run
+  duration, not the per-call latency reported below.
+
 - **Per-question yes counts**, split by group: how often each side
   correctly identified the cause, pointed at the fix location, proposed a
   working fix, avoided fabrication, and was written for a learner. Useful for diagnosing *why*
@@ -243,6 +254,11 @@ Below the win counts:
   date, so treat it as a rough order of magnitude, not a bill. A model
   (generator or judge) with no entry in that table prints its token counts
   with "no pricing entry for this model" instead of a dollar figure.
+
+The results JSON carries the same information for later comparison:
+`timing` (`generator_seconds`, `judge_seconds`, `judge_concurrency`),
+`judge_retries_total` (sum of per-judgment `retries`), and `seed` (the
+`--seed` value, or `null`).
 
 A run where more than a third of judge comparisons failed to parse doesn't
 print win tallies, per-question yes counts, or claim counts at all. Those
