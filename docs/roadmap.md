@@ -104,6 +104,29 @@ Sequencing below follows from that.
   Verify: the retriever path on `main` runs the `ast` pinned-frame lookup by default, with
   no switch or flag gating it.
 
+- **eval-generator-model-env** (harness work): make `OPENAI_MODEL` a working env var for
+  the eval harness, as `evals/README.md` already claims.
+  Problem: `evals/README.md` (line 84) documents `OPENAI_MODEL` as an optional env var for
+  choosing the generator model, "set in `evals/fixture_app/settings.py`". Neither half holds.
+  `explain_errors/middleware.py` (line 96) reads `OPENAI_MODEL` only from Django settings via
+  `getattr(settings, "OPENAI_MODEL", "gpt-4o-mini")`, and `evals/fixture_app/settings.py` does
+  not set it. Setting the env var is a no-op; the generator is always `gpt-4o-mini`.
+  `evals/run.py` (line 756) reads the same setting for `generator_model`, so the results JSON
+  would record the default regardless. Line references checked against `main` on 2026-10-12.
+  Plan:
+  - The fixture app settings read `OPENAI_MODEL` from the environment, defaulting to
+    `gpt-4o-mini`. The package's settings-only resolution for `OPENAI_MODEL` stays as is
+    (invariant 4).
+  - The results JSON's `generator_model` reflects the model actually used.
+  - Optional: expose a `generator_model` input in `.github/workflows/evals.yml`, passed as an
+    env var only when set.
+  - `evals/README.md` stays accurate: the env var is documented as working.
+  Why: prerequisite for model comparisons in the eval harness (for example alternative
+  generators against `gpt-4o-mini`). Without it, a comparison silently tests the same model
+  twice.
+  Verify: `main`'s fixture settings read `OPENAI_MODEL` from `os.environ`, and a run with
+  `OPENAI_MODEL` set records that model in `generator_model`.
+
 - **judge-calibration-set** (harness work): measure how often the judge agrees with a
   human, instead of assuming it.
   `evals/spotcheck.py` covers one failure direction only: claims marked "contradicted"
