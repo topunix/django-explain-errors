@@ -43,6 +43,9 @@ jobs:
           EVAL_JUDGE_BASE_URL: ${{ vars.EVAL_JUDGE_BASE_URL }}
           EVAL_JUDGE_MODEL: ${{ vars.EVAL_JUDGE_MODEL }}
         run: |
+          OPENAI_API_KEY=$(printf '%s' "$OPENAI_API_KEY" | tr -cd 'A-Za-z0-9_-')
+          EVAL_JUDGE_API_KEY=$(printf '%s' "$EVAL_JUDGE_API_KEY" | tr -cd 'A-Za-z0-9_-')
+          export OPENAI_API_KEY EVAL_JUDGE_API_KEY
           if ! [[ "$RUNS" =~ ^[0-9]+$ ]] || [ "$RUNS" -lt 1 ]; then
             echo "::error::runs must be a positive integer, got '$RUNS'"
             exit 1
