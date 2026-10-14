@@ -72,6 +72,28 @@ resolves to `summary`) still shows only `summary` alone. Whether that
 residual gap is worth closing depends on how often that parity actually
 occurs in practice (unmeasured, same as above).
 
+**Fixture authoring rules.** Everything under `evals/fixture_app/` is indexed
+for RAG-on retrieval (`.py`, `.html` and `.txt` files, minus `migrations`
+and the other default exclusions). Anything written there can be returned to
+the model under test, so a fixture that states its own fix lets RAG-on win by
+reading the answer key. An audit of the first published runs found exactly
+that: a commented-out correct queryset on `bad_lookup`, a comment naming the
+recursion and its fix on `str_recursion`, and seed-data comments describing
+the data condition behind three other fixtures. When adding or editing a
+fixture:
+
+- No comment, docstring, or dead code inside `evals/fixture_app/` may state
+  or hint at the fix. Docstrings that describe what a view is for are fine.
+- No bug-describing comments in seed data. Seed records should read as
+  ordinary data.
+- No harness meta-text inside `evals/fixture_app/`: nothing that mentions the
+  harness, RAG, RAG-on or RAG-off, evals, or the fixtures registry. Put that
+  explanation in this file instead.
+- Ground truth (`expected_cause`, `expected_fix_location`) stays in
+  `evals/fixtures.py`, outside the indexed directory.
+- Correct patterns that appear naturally elsewhere in the app (for example
+  `get_object_or_404` in sibling views) are realistic grounding and may stay.
+
 **Fixture app configuration notes.** These explain choices in
 `evals/fixture_app/` that used to live as comments and docstrings inside it.
 They were moved here because everything in that directory is indexed for
