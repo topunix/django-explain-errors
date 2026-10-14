@@ -1,9 +1,4 @@
-"""Deterministic seed data for the fixture app.
-
-Called once per harness run against a freshly migrated (empty) SQLite
-database, so the autoincrement ids assumed by evals/fixtures.py URLs
-(e.g. author id 2, post id 1) are stable run over run.
-"""
+"""Seed data for the fixture blog."""
 from blog.models import Author, Comment, Post, Profile
 
 

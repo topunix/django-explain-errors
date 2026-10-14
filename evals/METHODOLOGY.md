@@ -71,3 +71,33 @@ call, not a `self.__str__` attribute access, so the reverse case (frame
 resolves to `summary`) still shows only `summary` alone. Whether that
 residual gap is worth closing depends on how often that parity actually
 occurs in practice (unmeasured, same as above).
+
+**Fixture app configuration notes.** These explain choices in
+`evals/fixture_app/` that used to live as comments and docstrings inside it.
+They were moved here because everything in that directory is indexed for
+RAG-on retrieval, so harness-describing text there is visible to the model
+under test (see "Fixture authoring rules" below).
+
+- The fixture app is a small, deliberately breakable Django blog. It is not
+  a real project; it exists so the harness has realistic tracebacks to feed
+  to the middleware.
+- `seed.py` runs once per harness run against a freshly migrated (empty)
+  SQLite database, so the autoincrement ids assumed by the URLs in
+  `evals/fixtures.py` (for example author id 2, post id 1) are stable run
+  over run.
+- `manage.py` is only for poking at the fixture app by hand (for example
+  `python manage.py runserver`). The harness itself (`run.py`) does not shell
+  out to it. It calls `django.setup()` and Django's management commands
+  directly.
+- `EXPLAIN_ERRORS_MAX_CALLS = 10_000`: the harness drives many fixtures in
+  quick succession, and the sliding-window throttle must never fire mid-run.
+- `EXPLAIN_ERRORS_DEDUP = False`: one middleware instance serves every
+  fixture and every `--runs` repeat in a pass, so dedup would replay a cached
+  explanation instead of generating a fresh one and corrupt the comparison.
+- `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE = False`: the JSON 500 body carries the
+  explanation text, which is how the harness reads it back out. `run.py`
+  overrides it per pass. The on-disk value is kept so the fixture app is also
+  usable interactively.
+- `EXPLAIN_ERRORS_RAG_ENABLED = False`: RAG is off by default. `run.py` flips
+  it on for the RAG-on pass and points `EXPLAIN_ERRORS_RAG_INCLUDE` at the
+  fixture app directory before building the index.
