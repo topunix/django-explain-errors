@@ -3,7 +3,7 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-SECRET_KEY = "eval-harness-fixture-app-not-for-production"
+SECRET_KEY = "fixture-blog-insecure-dev-key"
 DEBUG = True
 ALLOWED_HOSTS = ["*"]
 
