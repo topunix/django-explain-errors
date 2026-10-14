@@ -23,6 +23,8 @@ and for which kinds of errors.
 **TL;DR**
 
 - **Result:** RAG-on won 35 of 43 scored comparisons (5 RAG-off, 3 ties, 3 runs).
+  Measured before the fixture leakage audit; not comparable with later runs
+  (see Results).
 - **Biggest gains:** `points_to_fix_location` and `no_fabrication`.
 - **Latency:** p50 2.22s RAG-on vs 2.12s RAG-off.
 - **Cost:** about $1.37 per `--runs 3` pass, mostly the judge.
@@ -279,6 +281,15 @@ Final numbers, from the 2026-09-20 run (`evals/results/20260920T204005Z.json`):
 3 runs across all 15 fixtures, 45 comparisons, 2 judge failures, 43 scored.
 These numbers predate the `str_recursion` source-extraction fix and were
 not re-run.
+
+**Pre-audit results.** Every number in this section, and the TL;DR above,
+was measured before the fixture leakage audit. At that time the fixture app
+contained comments that stated the fix for `bad_lookup` and `str_recursion`
+and described the seed data behind `missing_profile`, `non_unique_get` and
+`none_attribute`, and RAG-on could retrieve them. The RAG-on win rate here is
+therefore possibly inflated and is not comparable with runs made
+after the audit. Re-run to get a clean baseline. See "Fixture authoring
+rules" in METHODOLOGY.md.
 
 **RAG-on won 35 of 43 scored comparisons** (5 rag-off, 3 tie).
 

@@ -49,6 +49,5 @@ class Comment(models.Model):
 
     @property
     def summary(self):
-        # Meant to trim the body for display, but calls back into __str__
-        # instead of formatting self.body directly -- infinite recursion.
+        # One-line form for list views.
         return f"{self.author_name}: {str(self)}"

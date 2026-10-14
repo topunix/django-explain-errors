@@ -1,9 +1,5 @@
 #!/usr/bin/env python
-"""Django's command-line utility, for poking at the fixture app by hand
-(e.g. `python manage.py runserver`). The eval harness itself (run.py) does
-not shell out to this -- it calls django.setup() and Django's management
-commands directly.
-"""
+"""Django's command-line utility for the fixture blog."""
 import os
 import sys
 
