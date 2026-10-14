@@ -14,21 +14,21 @@ def seed():
         bio="Mathematician and the first programmer.",
         website="https://example.com/ada",
     )
-    Author.objects.create(name="Alex Kim", email="alex@example.com")  # id 2, no profile
+    Author.objects.create(name="Alex Kim", email="alex@example.com")
     Author.objects.create(name="Grace Hopper", email="grace1@example.com")  # id 3
-    Author.objects.create(name="Grace Hopper", email="grace2@example.com")  # id 4, duplicate name
+    Author.objects.create(name="Grace Hopper", email="grace2@example.com")
 
     hello_world = Post.objects.create(
         title="Hello World",
         slug="hello-world",
         author=ada,
         body="My first post.",
-    )  # id 1, draft (no published_at)
+    )
     Post.objects.create(
         title="Second Post",
         slug="second-post",
         author=ada,
         body="Another one.",
-    )  # id 2, draft
+    )
 
     Comment.objects.create(post=hello_world, author_name="Reader", body="Great post!")
