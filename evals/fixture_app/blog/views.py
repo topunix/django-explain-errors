@@ -19,7 +19,6 @@ def post_comments(request, slug):
 
 def prolific_authors(request):
     """List authors who have written more than one post."""
-    # Intended: Author.objects.annotate(post_count=Count("posts")).filter(post_count__gt=1)
     authors = Author.objects.filter(post_count__gt=1)
     return render(request, "blog/author_list.html", {"authors": authors})
 
