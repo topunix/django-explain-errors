@@ -187,6 +187,38 @@ Sequencing below follows from that.
   the agreement rates in `evals/README.md` next to the results they qualify.
   Verify: `evals/README.md` on `main` reports a judge-human agreement rate.
 
+- **judge-retrieved-context** (harness work): let the judge verify claims that come from
+  project source the generator read but the judge was not shown.
+  Problem, corrected against `main` (a42880f): the judge is not limited to the traceback
+  and known facts. `evals/judge.py` already has a "Relevant project source" section, built
+  by `_build_judge_source` in `evals/run.py` and identical for both sides. But that section
+  is only the failing function, the `urls.py` route to the view, and the templates a fixture
+  names. It excludes files the RAG-on retriever can return, such as `settings.py`. A correct
+  detail RAG-on read from such a file is then marked "absent" at best, and can be marked
+  "contradicted" at worst.
+  Evidence: Evals #9, missing_tag_library run 1. The judge penalized RAG-on for an
+  `INSTALLED_APPS` list that came from the retrieved `settings.py`, and RAG-off won despite
+  a claim the judge itself marked contradicted. The fixture's `expected_fix_location` is
+  `fixture_app/settings.py:INSTALLED_APPS`, a file the judge source section never includes.
+  Change: extend the judge's source section so source-derived claims can be verified.
+  Decided: keep the judge's context symmetric. The same source section goes to the judge for
+  both sides of a comparison, so it cannot reveal which side is RAG-on. Extend it to include
+  config files such as `settings.py` when the fixture's `expected_fix_location` is there
+  (for missing_tag_library, the `INSTALLED_APPS` setting, extracted as the named setting and
+  not the whole file, in keeping with `_build_judge_source`'s rule against noisy excerpts and
+  so no secret-bearing settings reach the judge provider).
+  Rejected: passing RAG-on's retrieved chunks only with the RAG-on answer. It reveals which
+  side is RAG-on and undermines the A/B position randomization.
+  Comparability: changing judge inputs breaks comparison with Evals #9. A new baseline run
+  is required after this lands, and judge-calibration-set agreement should be re-checked
+  because the judge prompt inputs changed.
+  Sequencing: do not combine this with model-retirement-migration in a single run. Change
+  one variable at a time.
+  Relates to: retrieval-arms-eval, whose "give the judge the retrieved context for every
+  arm" requirement builds on this entry and may need more for arms with new context sources.
+  Verify: `_build_judge_source` in `evals/run.py` on `main` adds the config file named by
+  `expected_fix_location` (for missing_tag_library, the `INSTALLED_APPS` setting).
+
 - **retrieval-arms-eval** (harness work): compare retrieval combinations before building
   any of them. Arms:
   - (a) RAG as shipped, the baseline.
@@ -203,7 +235,8 @@ Sequencing below follows from that.
   - an error in module-level code such as `urlpatterns`;
   - a stale-index case where source is edited after `build_index()`.
   Give the judge the retrieved context for every arm, or correct source-derived details
-  score as fabrication (ties to the existing judge limitation in `evals/README.md`).
+  score as fabrication (ties to the existing judge limitation in `evals/README.md`; see
+  judge-retrieved-context).
   Record win rate, tokens, latency, and cost per arm in `evals/README.md`.
   Arms (b) through (e) may be implemented harness-side or behind an internal switch;
   nothing user-facing ships from this entry.
