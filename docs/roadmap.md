@@ -25,7 +25,68 @@ Sequencing below follows from that.
 
 ## Sequenced queue
 
-1. **django-docs-links**: cross-reference explanations to official Django documentation.
+1. **eval-generator-model-env** (harness work): make `OPENAI_MODEL` a working env var for
+   the eval harness, as `evals/README.md` already claims.
+   Problem: `evals/README.md` (line 84) documents `OPENAI_MODEL` as an optional env var for
+   choosing the generator model, "set in `evals/fixture_app/settings.py`". Neither half holds.
+   `explain_errors/middleware.py` (line 96) reads `OPENAI_MODEL` only from Django settings via
+   `getattr(settings, "OPENAI_MODEL", "gpt-4o-mini")`, and `evals/fixture_app/settings.py` does
+   not set it. Setting the env var is a no-op; the generator is always `gpt-4o-mini`.
+   `evals/run.py` (line 756) reads the same setting for `generator_model`, so the results JSON
+   would record the default regardless. Line references checked against `main` on 2026-10-12.
+   Plan:
+   - The fixture app settings read `OPENAI_MODEL` from the environment, defaulting to
+     `gpt-4o-mini`. The package's settings-only resolution for `OPENAI_MODEL` stays as is
+     (invariant 4).
+   - The results JSON's `generator_model` reflects the model actually used.
+   - Optional: expose a `generator_model` input in `.github/workflows/evals.yml`, passed as an
+     env var only when set.
+   - `evals/README.md` stays accurate: the env var is documented as working.
+   Why: prerequisite for model comparisons in the eval harness (for example alternative
+   generators against `gpt-4o-mini`). Without it, a comparison silently tests the same model
+   twice.
+   Verify: `main`'s fixture settings read `OPENAI_MODEL` from `os.environ`, and a run with
+   `OPENAI_MODEL` set records that model in `generator_model`.
+
+2. **model-retirement-migration** (deadline 2027-01-14, hard): OpenAI retires `gpt-4o`,
+   `gpt-4o-mini`, `gpt-4.1`, and `gpt-4.1-mini` on 2027-01-14. Calls to these models fail
+   after that date.
+   Audit of references on `main` at a42880f (2026-10-15). Rerun the grep, since this list
+   goes stale:
+   - Package default: `explain_errors/middleware.py` line 96 (`gpt-4o-mini` is the
+     `OPENAI_MODEL` default). The only code default in the package.
+   - Evals code: `evals/run.py` lines 186-187 (price table keys `gpt-4o-mini` and `gpt-4o`;
+     no `gpt-4.1` entries) and line 756 (`generator_model` fallback `gpt-4o-mini`).
+   - Evals docs: `evals/README.md` line 57 (measured-run description) and line 86
+     (`OPENAI_MODEL` default).
+   - Evals config: `.github/workflows/evals.yml` and `evals/fixture_app/settings.py` name no
+     model. The generator is the package default, so the workflow has no way to choose one
+     (see eval-generator-model-env).
+   - `README.md`: lines 19, 147, 229, 274, 518, 743.
+   - Tests: `tests/test_print_stdout.py` lines 36, 55, 86; `tests/test_debug_page.py` line
+     168; `tests/test_middleware.py` lines 271, 324; `tests/test_eval_run.py` lines 206, 209,
+     487.
+   - `CHANGELOG.md`: no references. `docs/`: this file only (eval-generator-model-env).
+   - No reference to `gpt-4.1` or `gpt-4.1-mini` exists anywhere on `main`. `gpt-4o` appears
+     only in the price table.
+   Package default: `gpt-4o-mini` is a retiring model, so changing the default is a
+   user-facing behavior change. It needs a CHANGELOG entry and a release before 2027-01-14.
+   It is a deliberate exception to invariant 5 (default behavior for existing users must not
+   change); record that in `CLAUDE.md` when it ships. Users who set `OPENAI_MODEL` themselves
+   are unaffected by the default but still need the README to say so.
+   Evals: the baseline is Evals #9 (commit a42880f; generator `gpt-4o-mini`, judge
+   `anthropic/claude-sonnet-5`, runs=3, seed=42; RAG-on 37, RAG-off 4, ties 4). Choose the
+   successor generator by running the harness with the judge, seed, and fixtures held
+   constant, then compare against Evals #9. Keep the Evals #9 results file referenced as the
+   pre-migration baseline; do not overwrite or delete it.
+   Depends on eval-generator-model-env, which sits directly ahead of this entry in the queue:
+   without a working `OPENAI_MODEL` path, a comparison run silently tests the same generator
+   twice.
+   Sequencing: one variable per run. Do not combine this with judge-retrieved-context.
+   Verify: `grep -rnE "gpt-4o|gpt-4\.1" explain_errors/ evals/ README.md tests/` on `main`
+   returns no match for a retiring model ID (the Evals #9 baseline record excepted).
+
+3. **django-docs-links**: cross-reference explanations to official Django documentation.
    Ship the cheap version first: a static map of exception type plus context to a docs
    anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
    generated prose is not, which matters most for the learning audience and shrinks the
@@ -41,7 +102,7 @@ Sequencing below follows from that.
      404 or silently fall back.
    Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
 
-2. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
+4. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
    backed by shipped behavior. Not before. The README documents shipped behavior; anything
    earlier is a promise that has to be kept.
    Verify: the README lead paragraph describes a grounded Django learning aid rather than an
@@ -53,7 +114,7 @@ Sequencing below follows from that.
      ahead of the rest of the positioning rewrite.
      Verify: `README.md` on `main` has a `## Production Safety` heading.
 
-3. **editor-open-links**: in the injected debug page, render each traceback frame (and each
+5. **editor-open-links**: in the injected debug page, render each traceback frame (and each
    source file cited by retrieval) as an "open in editor" link to that file and line. Use a
    configurable URL template setting, for example
    `EXPLAIN_ERRORS_EDITOR_URL = "vscode://file/{path}:{line}"`, following the pattern used by
@@ -104,29 +165,6 @@ Sequencing below follows from that.
   Verify: the retriever path on `main` runs the `ast` pinned-frame lookup by default, with
   no switch or flag gating it.
 
-- **eval-generator-model-env** (harness work): make `OPENAI_MODEL` a working env var for
-  the eval harness, as `evals/README.md` already claims.
-  Problem: `evals/README.md` (line 84) documents `OPENAI_MODEL` as an optional env var for
-  choosing the generator model, "set in `evals/fixture_app/settings.py`". Neither half holds.
-  `explain_errors/middleware.py` (line 96) reads `OPENAI_MODEL` only from Django settings via
-  `getattr(settings, "OPENAI_MODEL", "gpt-4o-mini")`, and `evals/fixture_app/settings.py` does
-  not set it. Setting the env var is a no-op; the generator is always `gpt-4o-mini`.
-  `evals/run.py` (line 756) reads the same setting for `generator_model`, so the results JSON
-  would record the default regardless. Line references checked against `main` on 2026-10-12.
-  Plan:
-  - The fixture app settings read `OPENAI_MODEL` from the environment, defaulting to
-    `gpt-4o-mini`. The package's settings-only resolution for `OPENAI_MODEL` stays as is
-    (invariant 4).
-  - The results JSON's `generator_model` reflects the model actually used.
-  - Optional: expose a `generator_model` input in `.github/workflows/evals.yml`, passed as an
-    env var only when set.
-  - `evals/README.md` stays accurate: the env var is documented as working.
-  Why: prerequisite for model comparisons in the eval harness (for example alternative
-  generators against `gpt-4o-mini`). Without it, a comparison silently tests the same model
-  twice.
-  Verify: `main`'s fixture settings read `OPENAI_MODEL` from `os.environ`, and a run with
-  `OPENAI_MODEL` set records that model in `generator_model`.
-
 - **judge-calibration-set** (harness work): measure how often the judge agrees with a
   human, instead of assuming it.
   `evals/spotcheck.py` covers one failure direction only: claims marked "contradicted"
@@ -149,6 +187,38 @@ Sequencing below follows from that.
   the agreement rates in `evals/README.md` next to the results they qualify.
   Verify: `evals/README.md` on `main` reports a judge-human agreement rate.
 
+- **judge-retrieved-context** (harness work): let the judge verify claims that come from
+  project source the generator read but the judge was not shown.
+  Problem, corrected against `main` (a42880f): the judge is not limited to the traceback
+  and known facts. `evals/judge.py` already has a "Relevant project source" section, built
+  by `_build_judge_source` in `evals/run.py` and identical for both sides. But that section
+  is only the failing function, the `urls.py` route to the view, and the templates a fixture
+  names. It excludes files the RAG-on retriever can return, such as `settings.py`. A correct
+  detail RAG-on read from such a file is then marked "absent" at best, and can be marked
+  "contradicted" at worst.
+  Evidence: Evals #9, missing_tag_library run 1. The judge penalized RAG-on for an
+  `INSTALLED_APPS` list that came from the retrieved `settings.py`, and RAG-off won despite
+  a claim the judge itself marked contradicted. The fixture's `expected_fix_location` is
+  `fixture_app/settings.py:INSTALLED_APPS`, a file the judge source section never includes.
+  Change: extend the judge's source section so source-derived claims can be verified.
+  Decided: keep the judge's context symmetric. The same source section goes to the judge for
+  both sides of a comparison, so it cannot reveal which side is RAG-on. Extend it to include
+  config files such as `settings.py` when the fixture's `expected_fix_location` is there
+  (for missing_tag_library, the `INSTALLED_APPS` setting, extracted as the named setting and
+  not the whole file, in keeping with `_build_judge_source`'s rule against noisy excerpts and
+  so no secret-bearing settings reach the judge provider).
+  Rejected: passing RAG-on's retrieved chunks only with the RAG-on answer. It reveals which
+  side is RAG-on and undermines the A/B position randomization.
+  Comparability: changing judge inputs breaks comparison with Evals #9. A new baseline run
+  is required after this lands, and judge-calibration-set agreement should be re-checked
+  because the judge prompt inputs changed.
+  Sequencing: do not combine this with model-retirement-migration in a single run. Change
+  one variable at a time.
+  Relates to: retrieval-arms-eval, whose "give the judge the retrieved context for every
+  arm" requirement builds on this entry and may need more for arms with new context sources.
+  Verify: `_build_judge_source` in `evals/run.py` on `main` adds the config file named by
+  `expected_fix_location` (for missing_tag_library, the `INSTALLED_APPS` setting).
+
 - **retrieval-arms-eval** (harness work): compare retrieval combinations before building
   any of them. Arms:
   - (a) RAG as shipped, the baseline.
@@ -165,7 +235,8 @@ Sequencing below follows from that.
   - an error in module-level code such as `urlpatterns`;
   - a stale-index case where source is edited after `build_index()`.
   Give the judge the retrieved context for every arm, or correct source-derived details
-  score as fabrication (ties to the existing judge limitation in `evals/README.md`).
+  score as fabrication (ties to the existing judge limitation in `evals/README.md`; see
+  judge-retrieved-context).
   Record win rate, tokens, latency, and cost per arm in `evals/README.md`.
   Arms (b) through (e) may be implemented harness-side or behind an internal switch;
   nothing user-facing ships from this entry.
