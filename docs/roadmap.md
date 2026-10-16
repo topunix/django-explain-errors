@@ -194,6 +194,34 @@ Sequencing below follows from that.
   Verify: `_build_judge_source` in `evals/run.py` on `main` adds the config file named by
   `expected_fix_location` (for missing_tag_library, the `INSTALLED_APPS` setting).
 
+- **overlap-stratified-results** (harness work): measure the judge/retriever overlap bias
+  instead of only caveating it.
+  The judge checks claims against the failing function's source (`_build_judge_source` in
+  `evals/run.py`), which RAG-on often retrieves too, so part of RAG-on's `no_fabrication`
+  advantage may come from the judge and generator sharing material RAG-off never sees.
+  `evals/README.md` lists this as a limitation; this entry turns it into a measurement.
+  Gap: call records in the results file store the explanation, traceback, latency, and
+  tokens, but not which chunks RAG-on retrieved.
+  Shape:
+  - Record, for every RAG-on call, the retrieved chunks' file paths and line ranges in the
+    results file. Capture them through a logger record emitted by the retriever rather than
+    by patching another internal function, to avoid adding a second coupling like the
+    existing `sanitize_traceback` patch (see the loose end on that).
+  - Mark a comparison as "overlap" when any retrieved chunk intersects any segment of the
+    judge's source section (the failing function, the `urls.py` route, named templates,
+    and any config settings added by judge-retrieved-context): same file and intersecting
+    line range. Otherwise "no overlap".
+  - Report `no_fabrication` and `points_to_fix_location` yes counts and win counts split by
+    group and by overlap. Report raw counts, not percentages: with 45 comparisons, some
+    cells will be too small for a rate to mean anything.
+  Reading the result: if RAG-on still wins on no-overlap comparisons, the overlap is not
+  what drives its advantage. If the advantage disappears there, say so in `evals/README.md`
+  and restate the headline result accordingly.
+  Sequencing: after judge-retrieved-context, so overlap is measured against the judge
+  inputs that will actually be used.
+  Credit: suggested by a reader of the eval write-up.
+  Verify: `evals/README.md` on `main` reports results split by overlap.
+
 - **retrieval-arms-eval** (harness work): compare retrieval combinations before building
   any of them. Arms:
   - (a) RAG as shipped, the baseline.
@@ -213,6 +241,7 @@ Sequencing below follows from that.
   score as fabrication (ties to the existing judge limitation in `evals/README.md`; see
   judge-retrieved-context).
   Record win rate, tokens, latency, and cost per arm in `evals/README.md`.
+  Report each arm's results split by overlap, per overlap-stratified-results.
   Arms (b) through (e) may be implemented harness-side or behind an internal switch;
   nothing user-facing ships from this entry.
   Decision rules:
