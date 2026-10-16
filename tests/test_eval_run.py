@@ -9,6 +9,7 @@ import os
 import subprocess
 import sys
 import random
+import runpy
 import threading
 import time
 import unittest
@@ -423,6 +424,27 @@ class TallyRetriesTest(unittest.TestCase):
             tally_retries([{"retries": 2}, {"retries": 0}, {}, {"retries": None}, {"retries": 1}]),
             3,
         )
+
+
+class FixtureSettingsModelTest(unittest.TestCase):
+    """The fixture app's settings resolve OPENAI_MODEL from the environment."""
+
+    SETTINGS_PATH = os.path.join(REPO_ROOT, "evals", "fixture_app", "settings.py")
+
+    def _model(self, **env):
+        with patch.dict(os.environ, env):
+            if "OPENAI_MODEL" not in env:
+                os.environ.pop("OPENAI_MODEL", None)
+            return runpy.run_path(self.SETTINGS_PATH)["OPENAI_MODEL"]
+
+    def test_reads_env_var(self):
+        self.assertEqual(self._model(OPENAI_MODEL="some-other-model"), "some-other-model")
+
+    def test_unset_falls_back_to_default(self):
+        self.assertEqual(self._model(), "gpt-4o-mini")
+
+    def test_empty_string_falls_back_to_default(self):
+        self.assertEqual(self._model(OPENAI_MODEL=""), "gpt-4o-mini")
 
 
 class EvalHarnessEndToEndTest(unittest.TestCase):

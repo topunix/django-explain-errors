@@ -83,7 +83,7 @@ generator, and mixing them would defeat the point of an independent judge.
 |---|---|
 | `OPENAI_API_KEY` | required |
 | `OPENAI_BASE_URL` | optional, for an OpenAI-compatible endpoint |
-| `OPENAI_MODEL` | optional, defaults to `gpt-4o-mini` (set in `evals/fixture_app/settings.py`) |
+| `OPENAI_MODEL` | optional, defaults to `gpt-4o-mini` (read by `evals/fixture_app/settings.py`; an empty value also means the default) |
 
 **Judge** (independent client, see `evals/judge.py`):
 
@@ -200,6 +200,7 @@ branch and inputs:
 | `runs` | `3` | `--runs` |
 | `fixture` | empty (all fixtures) | `--fixture`, passed only when set. One fixture name. |
 | `seed` | empty (unseeded) | `--seed`, passed only when set. Must be an integer. |
+| `generator_model` | empty (default `gpt-4o-mini`) | `OPENAI_MODEL` env var, read by the fixture app settings. Empty means the default. |
 
 **Download results:** open the run page and use the Artifacts section
 (`eval-results`, kept 90 days), or run
