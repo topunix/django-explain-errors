@@ -44,6 +44,10 @@ DATABASES = {
 USE_TZ = True
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# `or`, not a get() default: a blank value (e.g. an empty workflow input)
+# must fall back to the default.
+OPENAI_MODEL = os.environ.get("OPENAI_MODEL") or "gpt-4o-mini"
+
 EXPLAIN_ERRORS_MAX_CALLS = 10_000
 EXPLAIN_ERRORS_WINDOW_SECONDS = 60
 

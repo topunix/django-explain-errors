@@ -25,30 +25,7 @@ Sequencing below follows from that.
 
 ## Sequenced queue
 
-1. **eval-generator-model-env** (harness work): make `OPENAI_MODEL` a working env var for
-   the eval harness, as `evals/README.md` already claims.
-   Problem: `evals/README.md` (line 84) documents `OPENAI_MODEL` as an optional env var for
-   choosing the generator model, "set in `evals/fixture_app/settings.py`". Neither half holds.
-   `explain_errors/middleware.py` (line 96) reads `OPENAI_MODEL` only from Django settings via
-   `getattr(settings, "OPENAI_MODEL", "gpt-4o-mini")`, and `evals/fixture_app/settings.py` does
-   not set it. Setting the env var is a no-op; the generator is always `gpt-4o-mini`.
-   `evals/run.py` (line 756) reads the same setting for `generator_model`, so the results JSON
-   would record the default regardless. Line references checked against `main` on 2026-10-12.
-   Plan:
-   - The fixture app settings read `OPENAI_MODEL` from the environment, defaulting to
-     `gpt-4o-mini`. The package's settings-only resolution for `OPENAI_MODEL` stays as is
-     (invariant 4).
-   - The results JSON's `generator_model` reflects the model actually used.
-   - Optional: expose a `generator_model` input in `.github/workflows/evals.yml`, passed as an
-     env var only when set.
-   - `evals/README.md` stays accurate: the env var is documented as working.
-   Why: prerequisite for model comparisons in the eval harness (for example alternative
-   generators against `gpt-4o-mini`). Without it, a comparison silently tests the same model
-   twice.
-   Verify: `main`'s fixture settings read `OPENAI_MODEL` from `os.environ`, and a run with
-   `OPENAI_MODEL` set records that model in `generator_model`.
-
-2. **model-retirement-migration** (deadline 2027-01-14, hard): OpenAI retires `gpt-4o`,
+1. **model-retirement-migration** (deadline 2027-01-14, hard): OpenAI retires `gpt-4o`,
    `gpt-4o-mini`, `gpt-4.1`, and `gpt-4.1-mini` on 2027-01-14. Calls to these models fail
    after that date.
    Audit of references on `main` at a42880f (2026-10-15). Rerun the grep, since this list
@@ -59,14 +36,15 @@ Sequencing below follows from that.
      no `gpt-4.1` entries) and line 756 (`generator_model` fallback `gpt-4o-mini`).
    - Evals docs: `evals/README.md` line 57 (measured-run description) and line 86
      (`OPENAI_MODEL` default).
-   - Evals config: `.github/workflows/evals.yml` and `evals/fixture_app/settings.py` name no
-     model. The generator is the package default, so the workflow has no way to choose one
-     (see eval-generator-model-env).
+   - Evals config: `evals/fixture_app/settings.py` carries the `gpt-4o-mini` fallback literal
+     (`OPENAI_MODEL` env var, empty means default); `evals/README.md` and
+     `tests/test_eval_run.py` repeat it. `.github/workflows/evals.yml` names no model: the
+     `generator_model` input chooses one.
    - `README.md`: lines 19, 147, 229, 274, 518, 743.
    - Tests: `tests/test_print_stdout.py` lines 36, 55, 86; `tests/test_debug_page.py` line
      168; `tests/test_middleware.py` lines 271, 324; `tests/test_eval_run.py` lines 206, 209,
      487.
-   - `CHANGELOG.md`: no references. `docs/`: this file only (eval-generator-model-env).
+   - `CHANGELOG.md`: no references. `docs/`: this file only.
    - No reference to `gpt-4.1` or `gpt-4.1-mini` exists anywhere on `main`. `gpt-4o` appears
      only in the price table.
    Package default: `gpt-4o-mini` is a retiring model, so changing the default is a
@@ -79,14 +57,11 @@ Sequencing below follows from that.
    successor generator by running the harness with the judge, seed, and fixtures held
    constant, then compare against Evals #9. Keep the Evals #9 results file referenced as the
    pre-migration baseline; do not overwrite or delete it.
-   Depends on eval-generator-model-env, which sits directly ahead of this entry in the queue:
-   without a working `OPENAI_MODEL` path, a comparison run silently tests the same generator
-   twice.
    Sequencing: one variable per run. Do not combine this with judge-retrieved-context.
    Verify: `grep -rnE "gpt-4o|gpt-4\.1" explain_errors/ evals/ README.md tests/` on `main`
    returns no match for a retiring model ID (the Evals #9 baseline record excepted).
 
-3. **django-docs-links**: cross-reference explanations to official Django documentation.
+2. **django-docs-links**: cross-reference explanations to official Django documentation.
    Ship the cheap version first: a static map of exception type plus context to a docs
    anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
    generated prose is not, which matters most for the learning audience and shrinks the
@@ -102,7 +77,7 @@ Sequencing below follows from that.
      404 or silently fall back.
    Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
 
-4. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
+3. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
    backed by shipped behavior. Not before. The README documents shipped behavior; anything
    earlier is a promise that has to be kept.
    Verify: the README lead paragraph describes a grounded Django learning aid rather than an
@@ -114,7 +89,7 @@ Sequencing below follows from that.
      ahead of the rest of the positioning rewrite.
      Verify: `README.md` on `main` has a `## Production Safety` heading.
 
-5. **editor-open-links**: in the injected debug page, render each traceback frame (and each
+4. **editor-open-links**: in the injected debug page, render each traceback frame (and each
    source file cited by retrieval) as an "open in editor" link to that file and line. Use a
    configurable URL template setting, for example
    `EXPLAIN_ERRORS_EDITOR_URL = "vscode://file/{path}:{line}"`, following the pattern used by

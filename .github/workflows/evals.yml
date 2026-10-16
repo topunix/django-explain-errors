@@ -15,6 +15,10 @@ on:
         description: "Integer seed for A/B position draws (harness --seed). Empty means unseeded."
         type: string
         default: ""
+      generator_model:
+        description: "Generator model (OPENAI_MODEL). Empty uses the default, gpt-4o-mini."
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -38,6 +42,7 @@ jobs:
           RUNS: ${{ inputs.runs }}
           FIXTURE: ${{ inputs.fixture }}
           SEED: ${{ inputs.seed }}
+          OPENAI_MODEL: ${{ inputs.generator_model }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           EVAL_JUDGE_API_KEY: ${{ secrets.EVAL_JUDGE_API_KEY }}
           EVAL_JUDGE_BASE_URL: ${{ vars.EVAL_JUDGE_BASE_URL }}
