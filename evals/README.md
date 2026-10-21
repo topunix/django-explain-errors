@@ -276,6 +276,40 @@ is recorded as a judge failure, counted separately, and excluded from the
 win counts and per-question tallies. It is never silently dropped and
 never counted as a tie.
 
+### Generation failures
+
+A call whose explanation is `null`, empty, or whitespace-only is a generation
+failure, not an explanation. It is never sent to the judge, so a broken
+generator cannot show up as a run of ties.
+
+New fields in the results JSON (additive; results files written before they
+existed still load, and readers treat a call without `generation_failed` as
+failed when its explanation is blank):
+
+- Each entry in `calls`:
+  - `generation_failed`: `true` when the explanation was missing or blank.
+  - `generation_error`: the reason from the middleware's stdout line
+    `Failed to get an explanation from the model API: <reason>` (first line
+    only), or `null` if the line was not printed. The line is still shown on
+    the console.
+- Each entry in `judgments` for a pair where either call failed:
+  - `judgment_skipped: true`, `judge_failure: false`.
+  - `generation_failed_sides`: `["rag_on"]`, `["rag_off"]`, or both.
+  - Only `fixture`, `group`, `run_index`, `rag_on_is_a`, and `retries` (0) are
+    set; there are no `winner_side`, `a`, or `b` fields.
+
+Skipped pairs count toward no group's wins, ties, per-question counts, or
+claim counts, and are left out of the judge-failure ratio.
+If every pair was skipped, the summary prints `RUN INCOMPLETE` instead of win tallies.
+
+The summary prints two lines (and the `evals.yml` job summary carries the same):
+
+- `Generation failures: X of N calls`
+- `Skipped pairs (generation failure, not judged): S`
+
+When X is above zero, the `evals.yml` job also emits a `::warning::`
+annotation with the count. The run still succeeds.
+
 ## Results
 
 Final numbers, from the 2026-09-20 run (`evals/results/20260920T204005Z.json`):

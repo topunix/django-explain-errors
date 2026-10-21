@@ -68,6 +68,7 @@ jobs:
           fi
           python evals/run.py "${args[@]}"
       - name: Write summary
+        id: summary
         if: always()
         run: |
           python - <<'PY' >> "$GITHUB_STEP_SUMMARY"
@@ -80,7 +81,20 @@ jobs:
           path = files[-1]
           data = json.load(open(path))
           judgments = data["judgments"]
-          failed = sum(1 for j in judgments if j["judge_failure"])
+          # Pairs skipped for a generation failure never reached the judge.
+          # Results files from before this field existed have none.
+          skipped = sum(1 for j in judgments if j.get("judgment_skipped"))
+          judged = [j for j in judgments if not j.get("judgment_skipped")]
+          failed = sum(1 for j in judged if j["judge_failure"])
+          def gen_failed(c):
+              flag = c.get("generation_failed")
+              if flag is not None:
+                  return bool(flag)
+              e = c.get("explanation")
+              return not (isinstance(e, str) and e.strip())
+          gen_failures = sum(1 for c in data["calls"] if gen_failed(c))
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"generation_failures={gen_failures}\n")
           print("## Eval results")
           print()
           print(f"- File: `{os.path.basename(path)}`")
@@ -88,7 +102,9 @@ jobs:
           print(f"- Generator: `{data['generator_model']}`")
           print(f"- Judge: `{data['judge_model']}`")
           print(f"- Runs: {data['runs']}, seed: {data['seed']}")
-          print(f"- Judge failures: {failed} of {len(judgments)}")
+          print(f"- Generation failures: {gen_failures} of {len(data['calls'])} calls")
+          print(f"- Skipped pairs (generation failure, not judged): {skipped}")
+          print(f"- Judge failures: {failed} of {len(judged)}")
           print(f"- Judge retries: {data['judge_retries_total']}")
           t = data["timing"]
           print(
@@ -100,7 +116,8 @@ jobs:
           print("|---|---|---|---|")
           for g in ("A", "B"):
               s = [j["winner_side"] for j in judgments
-                   if j["group"] == g and not j["judge_failure"]]
+                   if j["group"] == g and not j["judge_failure"]
+                   and not j.get("judgment_skipped")]
               print(f"| {g} | {s.count('rag_on')} | {s.count('rag_off')} | {s.count('tie')} |")
           print()
           print("| Side | Mean latency (s) | p50 latency (s) | Calls |")
@@ -114,6 +131,12 @@ jobs:
           print()
           print("CI latency is not comparable with local runs.")
           PY
+      - name: Annotate generation failures
+        if: always() && steps.summary.outputs.generation_failures != '' && steps.summary.outputs.generation_failures != '0'
+        env:
+          GENERATION_FAILURES: ${{ steps.summary.outputs.generation_failures }}
+        run: |
+          echo "::warning::${GENERATION_FAILURES} generation failure(s) in this run; affected pairs were skipped, not judged"
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v7

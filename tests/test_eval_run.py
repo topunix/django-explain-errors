@@ -17,8 +17,13 @@ from unittest.mock import patch
 
 from evals.fixtures import FIXTURES_BY_NAME
 from evals.run import (
+    _capture_call,
     estimate_cost_usd,
+    is_generation_failure,
     judge_all,
+    parse_generation_error,
+    run_fixture,
+    tally_generation,
     tally_judgments,
     tally_latency,
     tally_retries,
@@ -422,6 +427,258 @@ class JudgeAllConcurrencyTest(unittest.TestCase):
         self.assertLessEqual(active["peak"], 4)
 
 
+def _skipped(group, sides):
+    return {
+        "group": group,
+        "judge_failure": False,
+        "judgment_skipped": True,
+        "generation_failed_sides": sides,
+        "rag_on_is_a": True,
+        "retries": 0,
+    }
+
+
+class _FakeResponse:
+    def __init__(self, status_code, body):
+        self.status_code = status_code
+        self._body = body
+
+    def json(self):
+        if isinstance(self._body, ValueError):
+            raise self._body
+        return self._body
+
+
+class GenerationFailureRecordingTest(unittest.TestCase):
+    """run_fixture flags calls with no usable explanation."""
+
+    def _run(self, response, generation_error=None):
+        fixture = FIXTURES_BY_NAME["none_attribute"]
+        captured = {
+            "exc_type": AttributeError,
+            "exception": None,
+            "traceback": "tb",
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "generation_error": generation_error,
+        }
+        with patch("evals.run._capture_call", return_value=(response, captured)):
+            call, _ = run_fixture(object(), fixture, False, 0)
+        return call
+
+    def test_null_explanation_is_a_failure(self):
+        call = self._run(
+            _FakeResponse(500, {"message": None}), generation_error="the model returned an empty response"
+        )
+        self.assertTrue(call["generation_failed"])
+        self.assertEqual(call["generation_error"], "the model returned an empty response")
+        self.assertIsNone(call["explanation"])
+
+    def test_whitespace_only_explanation_is_a_failure(self):
+        call = self._run(_FakeResponse(500, {"message": "  \n\t "}))
+        self.assertTrue(call["generation_failed"])
+        self.assertIsNone(call["generation_error"])
+
+    def test_empty_string_and_non_json_bodies_are_failures(self):
+        self.assertTrue(self._run(_FakeResponse(500, {"message": ""}))["generation_failed"])
+        self.assertTrue(self._run(_FakeResponse(500, ValueError("bad")))["generation_failed"])
+
+    def test_real_explanation_is_not_a_failure(self):
+        call = self._run(_FakeResponse(500, {"message": "Because None has no attribute."}))
+        self.assertFalse(call["generation_failed"])
+        self.assertIsNone(call["generation_error"])
+
+
+class GenerationErrorCaptureTest(unittest.TestCase):
+    def test_parses_reason_from_middleware_line(self):
+        text = "noise\nFailed to get an explanation from the model API: Error code: 404 - model not found\n"
+        self.assertEqual(
+            parse_generation_error(text), "Error code: 404 - model not found"
+        )
+
+    def test_no_failure_line_is_none(self):
+        self.assertIsNone(parse_generation_error("Error explanation (m):\n fine\n"))
+        self.assertIsNone(parse_generation_error(""))
+
+    def test_capture_call_records_reason_and_still_prints(self):
+        import contextlib
+        import io
+
+        outer = io.StringIO()
+
+        def fn():
+            print("Failed to get an explanation from the model API:", ValueError("boom"))
+            return "ok"
+
+        with contextlib.redirect_stdout(outer):
+            result, captured = _capture_call(fn)
+        self.assertEqual(result, "ok")
+        self.assertEqual(captured["generation_error"], "boom")
+        self.assertIn("boom", outer.getvalue())
+
+    def test_capture_call_without_failure_leaves_error_null(self):
+        _, captured = _capture_call(lambda: None)
+        self.assertIsNone(captured["generation_error"])
+
+
+class IsGenerationFailureTest(unittest.TestCase):
+    def test_flag_wins_when_present(self):
+        self.assertTrue(is_generation_failure({"generation_failed": True, "explanation": "x"}))
+        self.assertFalse(is_generation_failure({"generation_failed": False, "explanation": None}))
+
+    def test_older_records_without_the_flag_fall_back_to_the_explanation(self):
+        self.assertTrue(is_generation_failure({"explanation": None}))
+        self.assertTrue(is_generation_failure({"explanation": "   "}))
+        self.assertFalse(is_generation_failure({"explanation": "real"}))
+
+
+class JudgeSkipTest(unittest.TestCase):
+    """judge_all never calls the judge for a pair with a failed side."""
+
+    def _judge(self, off_explanation, on_explanation, **extra):
+        fixture = FIXTURES_BY_NAME["none_attribute"]
+
+        def call(rag, explanation):
+            record = {
+                "fixture": fixture.name,
+                "rag_enabled": rag,
+                "run_index": 0,
+                "traceback": "tb",
+                "explanation": explanation,
+            }
+            record.update(extra.get("on" if rag else "off", {}))
+            return record
+
+        calls = [call(False, off_explanation), call(True, on_explanation)]
+        with patch("evals.judge.get_judge_client", return_value=object()), patch(
+            "evals.judge.get_judge_model", return_value="m"
+        ), patch("evals.judge.compare", return_value={"fixture": fixture.name}) as compare, patch(
+            "evals.run._build_judge_source", return_value=[]
+        ):
+            judgments = judge_all([fixture], calls, {}, seed=1)
+        return judgments, compare
+
+    def test_neither_fails_judges_as_before(self):
+        judgments, compare = self._judge("off text", "on text")
+        compare.assert_called_once()
+        self.assertEqual(len(judgments), 1)
+        self.assertNotIn("judgment_skipped", judgments[0])
+
+    def test_rag_on_failure_skips_the_judge(self):
+        judgments, compare = self._judge("off text", None)
+        compare.assert_not_called()
+        self.assertTrue(judgments[0]["judgment_skipped"])
+        self.assertEqual(judgments[0]["generation_failed_sides"], ["rag_on"])
+        self.assertFalse(judgments[0]["judge_failure"])
+
+    def test_rag_off_failure_skips_the_judge(self):
+        judgments, compare = self._judge("", "on text")
+        compare.assert_not_called()
+        self.assertEqual(judgments[0]["generation_failed_sides"], ["rag_off"])
+
+    def test_both_failing_skips_and_names_both_sides(self):
+        judgments, compare = self._judge(None, None)
+        compare.assert_not_called()
+        self.assertEqual(
+            sorted(judgments[0]["generation_failed_sides"]), ["rag_off", "rag_on"]
+        )
+
+    def test_whitespace_only_explanation_skips_the_judge(self):
+        judgments, compare = self._judge("  \n ", "on text")
+        compare.assert_not_called()
+        self.assertEqual(judgments[0]["generation_failed_sides"], ["rag_off"])
+
+    def test_recorded_flag_skips_even_with_text_present(self):
+        judgments, compare = self._judge("off", "on", on={"generation_failed": True})
+        compare.assert_not_called()
+        self.assertEqual(judgments[0]["generation_failed_sides"], ["rag_on"])
+
+    def test_skipped_record_keeps_identifying_fields(self):
+        judgments, _ = self._judge(None, "on text")
+        j = judgments[0]
+        self.assertEqual((j["fixture"], j["group"], j["run_index"]), ("none_attribute", FIXTURES_BY_NAME["none_attribute"].group, 0))
+
+
+class SkippedPairTallyTest(unittest.TestCase):
+    def test_skipped_pairs_count_toward_no_group(self):
+        judgments = [
+            _judgment("A", "rag_on", rag_on_is_a=True),
+            _skipped("A", ["rag_on"]),
+            _skipped("B", ["rag_on", "rag_off"]),
+        ]
+        result = tally_judgments(judgments)
+        self.assertEqual(result["skipped_pairs"], 2)
+        self.assertEqual(result["judge_failures"], 0)
+        self.assertEqual(result["wins_by_group"]["A"], {"rag_on": 1, "rag_off": 0, "tie": 0})
+        self.assertEqual(result["wins_by_group"]["B"], {"rag_on": 0, "rag_off": 0, "tie": 0})
+        self.assertEqual(
+            sum(result["question_yes_counts_by_group"]["B"]["rag_on"].values()), 0
+        )
+
+    def test_no_skips_reports_zero(self):
+        self.assertEqual(tally_judgments([_judgment("A", "tie")])["skipped_pairs"], 0)
+
+    def test_tally_generation_counts_failures(self):
+        calls = [
+            {"explanation": "ok", "generation_failed": False},
+            {"explanation": None, "generation_failed": True},
+            {"explanation": "  "},  # older record, no flag
+        ]
+        self.assertEqual(tally_generation(calls), {"failures": 2, "calls": 3})
+
+    def test_summary_prints_generation_lines_and_excludes_skips_from_incomplete(self):
+        import contextlib
+        import io
+
+        from evals.run import print_summary
+
+        calls = [
+            {"explanation": None, "generation_failed": True, "rag_enabled": False,
+             "latency_seconds": 1.0, "prompt_tokens": None, "completion_tokens": None},
+            {"explanation": None, "generation_failed": True, "rag_enabled": True,
+             "latency_seconds": 1.0, "prompt_tokens": None, "completion_tokens": None},
+        ]
+        # Skipped pairs stay out of the judge-failure ratio: 1 judged, 0 failed.
+        judgments = [_judgment("A", "tie"), _skipped("A", ["rag_on", "rag_off"])]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            print_summary([], calls, judgments, "g", "j")
+        text = out.getvalue()
+        self.assertIn("Generation failures: 2 of 2 calls", text)
+        self.assertIn("Skipped pairs (generation failure, not judged): 1", text)
+        self.assertNotIn("RUN INCOMPLETE", text)
+
+    def test_all_pairs_skipped_prints_run_incomplete_without_dividing_by_zero(self):
+        import contextlib
+        import io
+
+        from evals.run import print_summary
+
+        calls = [
+            {"explanation": None, "generation_failed": True, "rag_enabled": flag,
+             "latency_seconds": 1.0, "prompt_tokens": None, "completion_tokens": None}
+            for flag in (False, True)
+        ]
+        judgments = [_skipped("A", ["rag_on", "rag_off"]), _skipped("B", ["rag_on"])]
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            print_summary([], calls, judgments, "g", "j")
+        text = out.getvalue()
+        self.assertIn("RUN INCOMPLETE: all 2 pair(s) were skipped", text)
+        self.assertNotIn("Wins by group", text)
+
+    def test_no_judgments_at_all_is_not_flagged_incomplete(self):
+        import contextlib
+        import io
+
+        from evals.run import print_summary
+
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            print_summary([], [], [], "g", "j")
+        self.assertNotIn("RUN INCOMPLETE", out.getvalue())
+
+
 class TallyRetriesTest(unittest.TestCase):
 
     def test_sums_per_judgment_retries_and_tolerates_missing(self):
@@ -530,10 +787,14 @@ class EvalHarnessEndToEndTest(unittest.TestCase):
             "prompt_tokens",
             "completion_tokens",
             "status_code",
+            "generation_failed",
+            "generation_error",
         }
         for call in data["calls"]:
             self.assertTrue(call_keys.issubset(call.keys()), call)
             self.assertEqual(call["status_code"], 500)
+            self.assertFalse(call["generation_failed"])
+            self.assertIsNone(call["generation_error"])
             self.assertEqual(call["explanation"], "Mocked generator explanation.")
             self.assertEqual(call["prompt_tokens"], 10)
             self.assertEqual(call["completion_tokens"], 5)
