@@ -185,6 +185,11 @@ def _build_judge_source(fixture, exception):
 PRICING_PER_1K_TOKENS = {
     "gpt-4o-mini": {"prompt": 0.00015, "completion": 0.0006},
     "gpt-4o": {"prompt": 0.0025, "completion": 0.01},
+    # gpt-6-luna standard rates ($0.10 / $0.50 per 1M tokens), checked
+    # 2026-10-16 against https://developers.openai.com/api/docs/models/gpt-6-luna.
+    # Ignores the surcharge for prompts over 272K tokens; eval prompts are far
+    # below it. A reasoning model: reasoning tokens bill as completion tokens.
+    "gpt-6-luna": {"prompt": 0.0001, "completion": 0.0005},
     # OpenRouter slug for the judge model this harness has actually been run
     # against; OpenRouter passes Anthropic's first-party rates through
     # unchanged ($2.00 / $10.00 per 1M tokens). Calibrated against a real

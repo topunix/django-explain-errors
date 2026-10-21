@@ -210,6 +210,11 @@ class TallyLatencyAndUsageTest(unittest.TestCase):
         cost = estimate_cost_usd("gpt-4o-mini", 1000, 1000)
         self.assertAlmostEqual(cost, 0.00015 + 0.0006)
 
+    def test_estimate_cost_for_gpt_6_luna(self):
+        cost = estimate_cost_usd("gpt-6-luna", 1000, 1000)
+        self.assertIsNotNone(cost)
+        self.assertAlmostEqual(cost, 0.0001 + 0.0005)
+
 
 class BuildJudgeSourceTest(unittest.TestCase):
     """Runs tests/_eval_judge_source_helper.py in a subprocess -- see its
