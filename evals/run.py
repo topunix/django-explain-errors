@@ -14,12 +14,14 @@ import json
 import logging
 import os
 import random
+import re
 import statistics
 import subprocess
 import sys
 import time
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 from urllib.parse import urlsplit
@@ -282,11 +284,64 @@ class _UsageCaptureHandler(logging.Handler):
             }
 
 
+GENERATION_FAILURE_PREFIX = "Failed to get an explanation from the model API:"
+_GENERATION_FAILURE_RE = re.compile(
+    "^" + re.escape(GENERATION_FAILURE_PREFIX) + r" ?(.*)$", re.MULTILINE
+)
+
+
+class _TeeStdout:
+    """Passes writes through to the real stdout while keeping a copy, so the
+    harness can read the middleware's failure line without hiding it.
+    """
+
+    def __init__(self, wrapped):
+        self._wrapped = wrapped
+        self._chunks = []
+
+    def write(self, text):
+        self._chunks.append(text)
+        return self._wrapped.write(text)
+
+    def flush(self):
+        self._wrapped.flush()
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+    def getvalue(self):
+        return "".join(self._chunks)
+
+
+def parse_generation_error(stdout_text):
+    """The <reason> from the middleware's "Failed to get an explanation from
+    the model API: <reason>" stdout line (first line of it), or None.
+    """
+    match = _GENERATION_FAILURE_RE.search(stdout_text or "")
+    if match is None:
+        return None
+    return match.group(1).strip() or None
+
+
+def is_generation_failure(call):
+    """True when a call produced no usable explanation. Reads the recorded
+    flag; results files from before the flag existed fall back to checking
+    the explanation itself.
+    """
+    flag = call.get("generation_failed")
+    if flag is not None:
+        return bool(flag)
+    explanation = call.get("explanation")
+    return not (isinstance(explanation, str) and explanation.strip())
+
+
 def _capture_call(fn):
     """Run fn() (a single request through the fixture app), returning
     (result, captured) where captured holds the exception type and instance
     the middleware actually handled, the sanitized traceback text sent to
-    the generator, and token usage if the generator reported any.
+    the generator, token usage if the generator reported any, and the reason
+    from the middleware's stdout failure line (`generation_error`) if the
+    generation failed.
 
     Exception type can't be read off got_request_exception: that signal
     only fires when the exception is left to propagate (preserve mode), and
@@ -309,6 +364,7 @@ def _capture_call(fn):
         "traceback": None,
         "prompt_tokens": None,
         "completion_tokens": None,
+        "generation_error": None,
     }
 
     def _spy(tb_text):
@@ -324,12 +380,18 @@ def _capture_call(fn):
     previous_level = logger.level
     logger.setLevel(logging.DEBUG)
     logger.addHandler(handler)
+    # Swapping sys.stdout is process-wide, not per-thread: this relies on
+    # generation calls running sequentially (run_all does; only the judge
+    # phase is concurrent).
+    tee = _TeeStdout(sys.stdout)
     try:
-        with patch.object(mw_mod, "sanitize_traceback", side_effect=_spy):
+        with patch.object(mw_mod, "sanitize_traceback", side_effect=_spy), redirect_stdout(tee):
             result = fn()
     finally:
         logger.removeHandler(handler)
         logger.setLevel(previous_level)
+
+    captured["generation_error"] = parse_generation_error(tee.getvalue())
 
     if handler.usage is not None:
         captured["prompt_tokens"] = handler.usage["prompt_tokens"]
@@ -375,6 +437,10 @@ def run_fixture(client, fixture, rag_enabled, run_index):
         except ValueError:
             explanation = None
 
+    # A missing, empty, or whitespace-only explanation is a generation
+    # failure, not an explanation: it must never reach the judge.
+    generation_failed = not (isinstance(explanation, str) and explanation.strip())
+
     call_record = {
         "fixture": fixture.name,
         "group": fixture.group,
@@ -386,6 +452,8 @@ def run_fixture(client, fixture, rag_enabled, run_index):
         "prompt_tokens": captured["prompt_tokens"],
         "completion_tokens": captured["completion_tokens"],
         "status_code": response.status_code,
+        "generation_failed": generation_failed,
+        "generation_error": captured["generation_error"],
     }
     return call_record, captured["exception"]
 
@@ -459,6 +527,22 @@ def judge_all(fixtures, calls, exceptions_by_fixture, concurrency=1, seed=None):
             )
 
     def _judge(job):
+        failed_sides = [
+            side
+            for side, call in (("rag_on", job["on_call"]), ("rag_off", job["off_call"]))
+            if is_generation_failure(call)
+        ]
+        if failed_sides:
+            return {
+                "fixture": job["fixture"].name,
+                "group": job["fixture"].group,
+                "run_index": job["run_index"],
+                "rag_on_is_a": job["rag_on_is_a"],
+                "judge_failure": False,
+                "judgment_skipped": True,
+                "generation_failed_sides": failed_sides,
+                "retries": 0,
+            }
         judgment = compare(
             client,
             model,
@@ -504,8 +588,14 @@ def tally_judgments(judgments):
         group: {"rag_on": 0, "rag_off": 0} for group in ("A", "B")
     }
     judge_failures = 0
+    skipped_pairs = 0
 
     for judgment in judgments:
+        if judgment.get("judgment_skipped"):
+            # A side failed to generate; the judge never saw this pair, so it
+            # counts toward no group's wins or ties.
+            skipped_pairs += 1
+            continue
         if judgment.get("judge_failure"):
             judge_failures += 1
             continue
@@ -530,6 +620,15 @@ def tally_judgments(judgments):
         "question_yes_counts_by_group": questions_by_group,
         "claim_counts_by_group": claim_counts_by_group,
         "judge_failures": judge_failures,
+        "skipped_pairs": skipped_pairs,
+    }
+
+
+def tally_generation(calls):
+    """Count calls that produced no usable explanation."""
+    return {
+        "failures": sum(1 for c in calls if is_generation_failure(c)),
+        "calls": len(calls),
     }
 
 
@@ -603,16 +702,29 @@ def print_summary(fixtures, calls, judgments, generator_model, judge_model, timi
     print(f"generator: {generator_model}   judge: {judge_model}")
     print(f"fixtures: {len(fixtures)}   calls: {len(calls)}   judgments: {len(judgments)}")
     judge_failures = tallied["judge_failures"]
+    skipped_pairs = tallied["skipped_pairs"]
+    generation = tally_generation(calls)
+    print(f"Generation failures: {generation['failures']} of {generation['calls']} calls")
+    print(f"Skipped pairs (generation failure, not judged): {skipped_pairs}")
     if judge_failures:
         print(f"judge failures (malformed response): {judge_failures}")
 
     # A judge that failed on more than a third of its calls didn't produce a
     # reliable sample -- printing win tallies from what's left reads as a
     # finding when it's really a partial run. See evals/README.md.
-    failure_fraction = (judge_failures / len(judgments)) if judgments else 0.0
-    incomplete = failure_fraction > 1 / 3
+    judged = len(judgments) - skipped_pairs
+    failure_fraction = (judge_failures / judged) if judged else 0.0
+    # Every pair skipped for a generation failure leaves nothing to tally.
+    all_skipped = bool(judgments) and judged == 0
+    incomplete = all_skipped or failure_fraction > 1 / 3
 
-    if incomplete:
+    if all_skipped:
+        print()
+        print(
+            f"RUN INCOMPLETE: all {skipped_pairs} pair(s) were skipped for "
+            "generation failures -- nothing was judged. Not printing win tallies."
+        )
+    elif incomplete:
         error_counts = Counter(
             j["error"] for j in judgments if j.get("judge_failure") and j.get("error")
         )
@@ -620,7 +732,7 @@ def print_summary(fixtures, calls, judgments, generator_model, judge_model, timi
         most_common_error = most_common[0][0] if most_common else "(no error captured)"
         print()
         print(
-            f"RUN INCOMPLETE: {judge_failures}/{len(judgments)} judge calls failed "
+            f"RUN INCOMPLETE: {judge_failures}/{judged} judge calls failed "
             "(more than a third) -- win tallies would represent a partial "
             "sample, not a result. Not printing them."
         )
