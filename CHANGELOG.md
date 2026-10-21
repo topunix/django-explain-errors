@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- OpenAI reasoning models (for example `gpt-6-luna`) reject `max_tokens`, so no explanation was generated. The middleware still sends `max_tokens` by default; if the API rejects that parameter, it retries once with `max_completion_tokens` and uses it for later calls.
+- An empty or `None` model response (for example, reasoning consuming the whole token budget) is now reported with the usual "Failed to get an explanation" message instead of printing `None` or showing a blank banner on the debug page. After the `max_completion_tokens` fallback, the truncation warning notes that reasoning tokens count against `OPENAI_MAX_TOKENS`.
+
 ## 0.11.0
 
 ### Added

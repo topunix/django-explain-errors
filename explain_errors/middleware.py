@@ -3,6 +3,7 @@ import logging
 import threading
 from collections import OrderedDict
 
+import openai
 from django.conf import settings
 from django.http import JsonResponse
 from asgiref.sync import markcoroutinefunction, sync_to_async
@@ -81,6 +82,9 @@ class ExplainErrorsMiddleware:
             # above this one runs in sync mode and receives a coroutine.
             markcoroutinefunction(self)
         self.openai_client = None
+        # Output-cap parameter sent to the model. Reasoning models reject
+        # max_tokens; _create_completion switches this once, per instance.
+        self._token_param = "max_tokens"
         self.throttle = None
         self.dedup_enabled = False
         self._explanation_cache = OrderedDict()
@@ -251,6 +255,39 @@ class ExplainErrorsMiddleware:
 
         return prompt
 
+    def _create_completion(self, messages):
+        """Send the chat completion, adapting to the model's output-cap parameter.
+
+        Sends max_tokens by default. If the API rejects exactly that parameter
+        (OpenAI reasoning models require max_completion_tokens), retries once
+        with max_completion_tokens and remembers the choice on this instance.
+        Any other error, or a failed retry, propagates to the caller.
+        """
+
+        def create(token_param):
+            return self.openai_client.chat.completions.create(
+                model=self.model,
+                messages=messages,
+                **{token_param: self.max_tokens},
+            )
+
+        try:
+            return create(self._token_param)
+        except openai.BadRequestError as exc:
+            if self._token_param != "max_tokens" or not (
+                getattr(exc, "param", None) == "max_tokens"
+                and getattr(exc, "code", None) == "unsupported_parameter"
+            ):
+                raise
+        response = create("max_completion_tokens")
+        self._token_param = "max_completion_tokens"
+        logger.info(
+            "explain_errors: model %s rejected max_tokens; using "
+            "max_completion_tokens instead",
+            self.model,
+        )
+        return response
+
     def _generate_explanation(self, prompt):
         """Call the model and return the explanation text, or None on failure.
 
@@ -260,13 +297,11 @@ class ExplainErrorsMiddleware:
         explanation = None
         try:
             # Call model API
-            response = self.openai_client.chat.completions.create(
-                model=self.model,
-                messages=[
+            response = self._create_completion(
+                [
                     {"role": "system", "content": self.system_prompt},
                     {"role": "user", "content": prompt},
-                ],
-                max_tokens=self.max_tokens,
+                ]
             )
             explanation = response.choices[0].message.content
             usage = getattr(response, "usage", None)
@@ -276,10 +311,22 @@ class ExplainErrorsMiddleware:
                 getattr(usage, "completion_tokens", None),
             )
             if response.choices[0].finish_reason == "length":
+                hint = ""
+                if self._token_param == "max_completion_tokens":
+                    hint = (
+                        " (reasoning tokens count against this limit; raise it "
+                        "if explanations come back short or empty)"
+                    )
                 logger.warning(
-                    "explain_errors: explanation truncated by OPENAI_MAX_TOKENS=%s",
+                    "explain_errors: explanation truncated by OPENAI_MAX_TOKENS=%s%s",
                     self.max_tokens,
+                    hint,
                 )
+
+            if not explanation or not explanation.strip():
+                # Reasoning can consume the whole budget and leave no text.
+                explanation = None
+                raise ValueError("the model returned an empty response")
 
             if getattr(settings, "EXPLAIN_ERRORS_PRINT_STDOUT", True):
                 print(f"Error explanation ({self.model}):\n", explanation)

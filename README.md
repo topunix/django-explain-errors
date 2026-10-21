@@ -220,6 +220,10 @@ catches the exception internally, so it never becomes an unhandled exception, bu
 than relying on `got_request_exception`. That event is unrelated to whatever error the
 developer is actually investigating.
 
+OpenAI reasoning models are supported. They reject `max_tokens`, so when the API rejects it
+the middleware retries once with `max_completion_tokens` (same value, `OPENAI_MAX_TOKENS`)
+and keeps using that for later calls. Other providers keep receiving `max_tokens`.
+
 ## Configuration
 
 | Setting / variable | Required | Description |
