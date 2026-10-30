@@ -10,7 +10,8 @@ permissions:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest (26.04) has no prebuilt Python 3.9. Revisit when 3.9 support is dropped.
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
