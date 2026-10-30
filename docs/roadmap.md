@@ -187,12 +187,20 @@ Sequencing below follows from that.
   Comparability: changing judge inputs breaks comparison with Evals #9. A new baseline run
   is required after this lands, and judge-calibration-set agreement should be re-checked
   because the judge prompt inputs changed.
+  Also: record the judge's evidence per run. Write each fixture's judge source section (the
+  `source_text` from `format_source_section(_build_judge_source(...))` in `evals/run.py`), or
+  its sha256, into the results JSON. Today it is rebuilt every run and never persisted, so a
+  score change cannot be checked against whether the judge's evidence changed (fixture edits
+  or a refactor of `_build_judge_source` would shift it silently). Land this with the source
+  section change so the new baseline is the first run with recorded judge inputs.
+  Credit: suggested by a reader of the eval write-up.
   Sequencing: do not combine this with model-retirement-migration in a single run. Change
   one variable at a time.
   Relates to: retrieval-arms-eval, whose "give the judge the retrieved context for every
   arm" requirement builds on this entry and may need more for arms with new context sources.
   Verify: `_build_judge_source` in `evals/run.py` on `main` adds the config file named by
   `expected_fix_location` (for missing_tag_library, the `INSTALLED_APPS` setting).
+  Verify: results JSON from an Evals run on `main` records the judge source section (or its sha256) per fixture.
 
 - **overlap-stratified-results** (harness work): measure the judge/retriever overlap bias
   instead of only caveating it.
