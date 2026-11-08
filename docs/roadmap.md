@@ -25,6 +25,10 @@ Sequencing below follows from that.
 
 ## Sequenced queue
 
+Sequencing: harness items come before product items because the judge must be validated
+before arms are compared, and each run changes one variable relative to the previous
+baseline. Nothing in this queue is shipped.
+
 1. **model-retirement-migration** (deadline 2027-01-14, hard): OpenAI retires `gpt-4o`,
    `gpt-4o-mini`, `gpt-4.1`, and `gpt-4.1-mini` on 2027-01-14. Calls to these models fail
    after that date.
@@ -57,11 +61,163 @@ Sequencing below follows from that.
    successor generator by running the harness with the judge, seed, and fixtures held
    constant, then compare against Evals #9. Keep the Evals #9 results file referenced as the
    pre-migration baseline; do not overwrite or delete it.
+   The gpt-6-luna run, compared against Evals #9, becomes the new baseline for
+   judge-retrieved-context. Record it as such once it exists; until then no replacement
+   baseline exists.
    Sequencing: one variable per run. Do not combine this with judge-retrieved-context.
    Verify: `grep -rnE "gpt-4o|gpt-4\.1" explain_errors/ evals/ README.md tests/` on `main`
    returns no match for a retiring model ID (the Evals #9 baseline record excepted).
 
-2. **django-docs-links**: cross-reference explanations to official Django documentation.
+2. **judge-retrieved-context** (harness work): let the judge verify claims that come from
+   project source the generator read but the judge was not shown.
+   Problem, corrected against `main` (a42880f): the judge is not limited to the traceback
+   and known facts. `evals/judge.py` already has a "Relevant project source" section, built
+   by `_build_judge_source` in `evals/run.py` and identical for both sides. But that section
+   is only the failing function, the `urls.py` route to the view, and the templates a fixture
+   names. It excludes files the RAG-on retriever can return, such as `settings.py`. A correct
+   detail RAG-on read from such a file is then marked "absent" at best, and can be marked
+   "contradicted" at worst.
+   Evidence: Evals #9, missing_tag_library run 1. The judge penalized RAG-on for an
+   `INSTALLED_APPS` list that came from the retrieved `settings.py`, and RAG-off won despite
+   a claim the judge itself marked contradicted. The fixture's `expected_fix_location` is
+   `fixture_app/settings.py:INSTALLED_APPS`, a file the judge source section never includes.
+   Change: extend the judge's source section so source-derived claims can be verified.
+   Decided: keep the judge's context symmetric. The same source section goes to the judge for
+   both sides of a comparison, so it cannot reveal which side is RAG-on. Extend it to include
+   config files such as `settings.py` when the fixture's `expected_fix_location` is there
+   (for missing_tag_library, the `INSTALLED_APPS` setting, extracted as the named setting and
+   not the whole file, in keeping with `_build_judge_source`'s rule against noisy excerpts and
+   so no secret-bearing settings reach the judge provider).
+   Rejected: passing RAG-on's retrieved chunks only with the RAG-on answer. It reveals which
+   side is RAG-on and undermines the A/B position randomization.
+   Comparability: changing judge inputs breaks comparison with Evals #9. A new baseline run
+   is required after this lands, and judge-calibration-set agreement should be re-checked
+   because the judge prompt inputs changed.
+   Also: record the judge's evidence per run. Write each fixture's judge source section (the
+   `source_text` from `format_source_section(_build_judge_source(...))` in `evals/run.py`), or
+   its sha256, into the results JSON. Today it is rebuilt every run and never persisted, so a
+   score change cannot be checked against whether the judge's evidence changed (fixture edits
+   or a refactor of `_build_judge_source` would shift it silently). Land this with the source
+   section change so the new baseline is the first run with recorded judge inputs.
+   Credit: suggested by a reader of the eval write-up.
+   Sequencing: do not combine this with model-retirement-migration in a single run. Change
+   one variable at a time. Its comparison point is the model-retirement-migration run, not
+   Evals #9.
+   Relates to: retrieval-arms-eval, whose "give the judge the retrieved context for every
+   arm" requirement builds on this entry and may need more for arms with new context sources.
+   Verify: `_build_judge_source` in `evals/run.py` on `main` adds the config file named by
+   `expected_fix_location` (for missing_tag_library, the `INSTALLED_APPS` setting).
+   Verify: results JSON from an Evals run on `main` records the judge source section (or its sha256) per fixture.
+
+3. **judge-calibration-set** (harness work): measure how often the judge agrees with a
+   human, instead of assuming it.
+   `evals/spotcheck.py` covers one failure direction only: claims marked "contradicted"
+   that still name real source identifiers, on a filtered sample. It never checks claims
+   marked "verified" or "absent", and never checks the per-question answers or the A/B
+   winner.
+   Shape: from one results file, draw 50 claims and 15 pairwise comparisons (one per
+   fixture). Stratify the claims so each status (verified, contradicted, absent) has at
+   least 10, and fill the rest at random; "contradicted" is rare, so a purely random draw
+   would leave it too thin to measure. A script presents each item to the human grader with
+   the judge's verdict hidden: the claim plus its source excerpt, or the two explanations
+   plus the fixture's known cause. Store the human labels in `evals/calibration/`. A second
+   script compares the judge with the human labels and reports agreement overall, per claim
+   status, per question, and for the winner.
+   Thresholds: at least 85% overall claim agreement, at least 75% for each claim status,
+   and winner agreement on at least 12 of 15 comparisons. Below any threshold, results from
+   that judge configuration are reported as provisional, not as findings, until the judge
+   prompt is fixed and re-calibrated.
+   Use: re-run the agreement check whenever the judge prompt or judge model changes. Report
+   the agreement rates in `evals/README.md` next to the results they qualify.
+   Verify: `evals/README.md` on `main` reports a judge-human agreement rate.
+
+4. **real-world-fixtures** (harness work, not started): add fixtures drawn from real
+   projects, so results do not rest only on synthetic cases written for the harness.
+   Source: public Django repos with a permissive license where a GitHub issue contains a
+   traceback and a linked commit fixes it.
+   Each fixture records:
+   - the repo URL and its license;
+   - the pre-fix commit SHA (the parent of the fixing commit);
+   - the traceback from the issue;
+   - the fix diff, stored as ground truth. eval-fix-validity reuses it.
+   Source handling, decided: fetch the source at the pinned SHA at harness time instead of
+   vendoring whole repos. The repo carries only fixture metadata, the traceback, and the fix
+   diff. Fetching needs network at harness time only; the unit test suite stays offline per
+   `CLAUDE.md`. Checkouts go in a gitignored cache directory.
+   Leakage: the fix commit and the issue text must never be indexed. Apply the
+   fixture-leakage audit rules (LEAK / HINT / REALISTIC) to the pinned source before a
+   fixture is accepted. Keep the fix diff and issue text outside the checked-out tree, so
+   the index build cannot reach them.
+   Layout: a directory of its own (for example `evals/real_world/`), separate from the
+   synthetic fixtures. Report results for both sets separately in `evals/README.md`. Never
+   merge them into one headline number.
+   Size: 10 to 15 fixtures to start. They are also usable as extra cases for
+   retrieval-arms-eval.
+   Verify: `evals/README.md` on `main` reports a run on the real-world set.
+
+5. **retrieval-arms-eval** (harness work): compare retrieval combinations before building
+   any of them. Arms:
+   - (a) RAG as shipped, the baseline.
+   - (b) ast only: pinned frame, no index.
+   - (c) ast + RAG.
+   - (d) ast + Jedi + RAG.
+   - Optionally (e) ast + Jedi, no index.
+   - (f) FTS5 keyword search plus sqlite-vec vector search over the same index, merged with
+     reciprocal rank fusion. Use the FTS5 trigram tokenizer so misspelled identifiers (the
+     `reverse()` URL name typo fixture) can still match. Rationale: tracebacks are full of
+     exact identifiers, and the renamed-field and URL-name fixtures involve identifiers that
+     are not in the stack.
+   New fixtures, chosen so that different arms should win:
+   - a renamed model field still used in a view (the definition is outside the stack);
+   - a `reverse()` URL name typo;
+   - a template error that raises, such as an unknown filter or tag (`TemplateSyntaxError`);
+   - an error in one method of a large class-based view;
+   - an error in module-level code such as `urlpatterns`;
+   - a stale-index case where source is edited after `build_index()`.
+   Cases from real-world-fixtures are included when available.
+   Give the judge the retrieved context for every arm, or correct source-derived details
+   score as fabrication (ties to the existing judge limitation in `evals/README.md`; see
+   judge-retrieved-context).
+   Record win rate, tokens, latency, and cost per arm in `evals/README.md`.
+   Report each arm's results split by overlap, per overlap-stratified-results.
+   Arms (b) through (f) may be implemented harness-side or behind an internal switch;
+   nothing user-facing ships from this entry.
+   Decision rules:
+   - Ship pinned-frame-retrieval if (c) beats (a).
+   - Pursue jedi-dependency-resolution only if (d) beats (c).
+   - Take up the retrieval-default strategic question if (b) or (e) comes close to (c).
+   - Consider hybrid keyword plus vector retrieval for the package only if (f) beats (a),
+     and compare it against (c) before choosing.
+   Run after judge-calibration-set, so the judge is validated before comparing arms.
+   Verify: `evals/README.md` records a harness run comparing these arms.
+
+6. **eval-fix-validity**: a second eval track that asks whether the suggested fix
+   works, not just whether the explanation reads better. For each fixture, the
+   harness (not the package) turns the explanation's suggested fix into a patch,
+   applies it to a temporary copy of `evals/fixture_app/`, re-hits the fixture URL,
+   and records the result. Report four rates per condition (RAG-on and RAG-off):
+   explained (diagnosis matches `expected_cause`), fix proposed, patch applied
+   cleanly, verified.
+   The pass condition is the gap to close first. Fixtures are URLs, not tests, and
+   "no 500 on re-request" is too weak: a patch that wraps the view in
+   `try/except` passes it. Each fixture needs its own oracle (expected status
+   code plus a response assertion, or a small test per fixture) written before any
+   patch is generated.
+   Why it matters: a passing oracle is ground truth that no LLM judge can
+   misread, which answers the judge limitation recorded in `evals/README.md`
+   (correct source-derived details scored as fabrication). It also tests whether
+   RAG's measured value (specificity) carries through to correct fixes, or only
+   to more specific prose.
+   Scope: harness only. A fix-and-verify mode inside the package (patch, apply in
+   a worktree, rerun tests) is out of scope. It overlaps coding agents, which
+   already do this loop, it assumes a failing test exists for a live request, and
+   executing generated code conflicts with the package's human-reader positioning.
+   Sequencing: after the public write-up of the existing harness results, so this
+   can be a second write-up rather than competing with the first.
+   Relates to: real-world-fixtures, whose stored fix diffs serve as ground truth here.
+   Verify: `evals/README.md` on `main` reports a verified-fix rate.
+
+7. **django-docs-links**: cross-reference explanations to official Django documentation.
    Ship the cheap version first: a static map of exception type plus context to a docs
    anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
    generated prose is not, which matters most for the learning audience and shrinks the
@@ -77,7 +233,7 @@ Sequencing below follows from that.
      404 or silently fall back.
    Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
 
-3. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
+8. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
    backed by shipped behavior. Not before. The README documents shipped behavior; anything
    earlier is a promise that has to be kept.
    Verify: the README lead paragraph describes a grounded Django learning aid rather than an
@@ -89,7 +245,7 @@ Sequencing below follows from that.
      ahead of the rest of the positioning rewrite.
      Verify: `README.md` on `main` has a `## Production Safety` heading.
 
-4. **editor-open-links**: in the injected debug page, render each traceback frame (and each
+9. **editor-open-links**: in the injected debug page, render each traceback frame (and each
    source file cited by retrieval) as an "open in editor" link to that file and line. Use a
    configurable URL template setting, for example
    `EXPLAIN_ERRORS_EDITOR_URL = "vscode://file/{path}:{line}"`, following the pattern used by
@@ -140,68 +296,6 @@ Sequencing below follows from that.
   Verify: the retriever path on `main` runs the `ast` pinned-frame lookup by default, with
   no switch or flag gating it.
 
-- **judge-calibration-set** (harness work): measure how often the judge agrees with a
-  human, instead of assuming it.
-  `evals/spotcheck.py` covers one failure direction only: claims marked "contradicted"
-  that still name real source identifiers, on a filtered sample. It never checks claims
-  marked "verified" or "absent", and never checks the per-question answers or the A/B
-  winner.
-  Shape: from one results file, draw 50 claims and 15 pairwise comparisons (one per
-  fixture). Stratify the claims so each status (verified, contradicted, absent) has at
-  least 10, and fill the rest at random; "contradicted" is rare, so a purely random draw
-  would leave it too thin to measure. A script presents each item to the human grader with
-  the judge's verdict hidden: the claim plus its source excerpt, or the two explanations
-  plus the fixture's known cause. Store the human labels in `evals/calibration/`. A second
-  script compares the judge with the human labels and reports agreement overall, per claim
-  status, per question, and for the winner.
-  Thresholds: at least 85% overall claim agreement, at least 75% for each claim status,
-  and winner agreement on at least 12 of 15 comparisons. Below any threshold, results from
-  that judge configuration are reported as provisional, not as findings, until the judge
-  prompt is fixed and re-calibrated.
-  Use: re-run the agreement check whenever the judge prompt or judge model changes. Report
-  the agreement rates in `evals/README.md` next to the results they qualify.
-  Verify: `evals/README.md` on `main` reports a judge-human agreement rate.
-
-- **judge-retrieved-context** (harness work): let the judge verify claims that come from
-  project source the generator read but the judge was not shown.
-  Problem, corrected against `main` (a42880f): the judge is not limited to the traceback
-  and known facts. `evals/judge.py` already has a "Relevant project source" section, built
-  by `_build_judge_source` in `evals/run.py` and identical for both sides. But that section
-  is only the failing function, the `urls.py` route to the view, and the templates a fixture
-  names. It excludes files the RAG-on retriever can return, such as `settings.py`. A correct
-  detail RAG-on read from such a file is then marked "absent" at best, and can be marked
-  "contradicted" at worst.
-  Evidence: Evals #9, missing_tag_library run 1. The judge penalized RAG-on for an
-  `INSTALLED_APPS` list that came from the retrieved `settings.py`, and RAG-off won despite
-  a claim the judge itself marked contradicted. The fixture's `expected_fix_location` is
-  `fixture_app/settings.py:INSTALLED_APPS`, a file the judge source section never includes.
-  Change: extend the judge's source section so source-derived claims can be verified.
-  Decided: keep the judge's context symmetric. The same source section goes to the judge for
-  both sides of a comparison, so it cannot reveal which side is RAG-on. Extend it to include
-  config files such as `settings.py` when the fixture's `expected_fix_location` is there
-  (for missing_tag_library, the `INSTALLED_APPS` setting, extracted as the named setting and
-  not the whole file, in keeping with `_build_judge_source`'s rule against noisy excerpts and
-  so no secret-bearing settings reach the judge provider).
-  Rejected: passing RAG-on's retrieved chunks only with the RAG-on answer. It reveals which
-  side is RAG-on and undermines the A/B position randomization.
-  Comparability: changing judge inputs breaks comparison with Evals #9. A new baseline run
-  is required after this lands, and judge-calibration-set agreement should be re-checked
-  because the judge prompt inputs changed.
-  Also: record the judge's evidence per run. Write each fixture's judge source section (the
-  `source_text` from `format_source_section(_build_judge_source(...))` in `evals/run.py`), or
-  its sha256, into the results JSON. Today it is rebuilt every run and never persisted, so a
-  score change cannot be checked against whether the judge's evidence changed (fixture edits
-  or a refactor of `_build_judge_source` would shift it silently). Land this with the source
-  section change so the new baseline is the first run with recorded judge inputs.
-  Credit: suggested by a reader of the eval write-up.
-  Sequencing: do not combine this with model-retirement-migration in a single run. Change
-  one variable at a time.
-  Relates to: retrieval-arms-eval, whose "give the judge the retrieved context for every
-  arm" requirement builds on this entry and may need more for arms with new context sources.
-  Verify: `_build_judge_source` in `evals/run.py` on `main` adds the config file named by
-  `expected_fix_location` (for missing_tag_library, the `INSTALLED_APPS` setting).
-  Verify: results JSON from an Evals run on `main` records the judge source section (or its sha256) per fixture.
-
 - **overlap-stratified-results** (harness work): measure the judge/retriever overlap bias
   instead of only caveating it.
   The judge checks claims against the failing function's source (`_build_judge_source` in
@@ -230,34 +324,13 @@ Sequencing below follows from that.
   Credit: suggested by a reader of the eval write-up.
   Verify: `evals/README.md` on `main` reports results split by overlap.
 
-- **retrieval-arms-eval** (harness work): compare retrieval combinations before building
-  any of them. Arms:
-  - (a) RAG as shipped, the baseline.
-  - (b) ast only: pinned frame, no index.
-  - (c) ast + RAG.
-  - (d) ast + Jedi + RAG.
-  - Optionally (e) ast + Jedi, no index.
-  - Optionally a lower-top-k variant of (c).
-  New fixtures, chosen so that different arms should win:
-  - a renamed model field still used in a view (the definition is outside the stack);
-  - a `reverse()` URL name typo;
-  - a template error that raises, such as an unknown filter or tag (`TemplateSyntaxError`);
-  - an error in one method of a large class-based view;
-  - an error in module-level code such as `urlpatterns`;
-  - a stale-index case where source is edited after `build_index()`.
-  Give the judge the retrieved context for every arm, or correct source-derived details
-  score as fabrication (ties to the existing judge limitation in `evals/README.md`; see
-  judge-retrieved-context).
-  Record win rate, tokens, latency, and cost per arm in `evals/README.md`.
-  Report each arm's results split by overlap, per overlap-stratified-results.
-  Arms (b) through (e) may be implemented harness-side or behind an internal switch;
-  nothing user-facing ships from this entry.
-  Decision rules:
-  - Ship pinned-frame-retrieval if (c) beats (a).
-  - Pursue jedi-dependency-resolution only if (d) beats (c).
-  - Take up the retrieval-default strategic question if (b) or (e) comes close to (c).
-  Run after judge-calibration-set, so the judge is validated before comparing arms.
-  Verify: `evals/README.md` records a harness run comparing these arms.
+- **cross-encoder-reranking** (conditional on retrieval-arms-eval, only if arm (f) wins
+  AND there is evidence that candidate ordering, not recall, is what limits results):
+  rerank the merged keyword and vector candidates with a cross-encoder.
+  Constraint: a local model behind an optional extra only, consistent with the existing
+  rule that PyTorch is justified only by privacy. No hosted reranker API, since that sends
+  the user's source to a third party.
+  Verify: an `extras_require` entry for a reranker exists in `setup.py`.
 
 - **jedi-dependency-resolution** (conditional on retrieval-arms-eval, only if arm (d)
   beats arm (c)): from the failing line, resolve referenced Python names to their
@@ -322,31 +395,6 @@ Sequencing below follows from that.
   Verify: README.md has a Requirements line and the "Debug page injection"
   section appears before "Async Support".
 
-- **eval-fix-validity**: a second eval track that asks whether the suggested fix
-  works, not just whether the explanation reads better. For each fixture, the
-  harness (not the package) turns the explanation's suggested fix into a patch,
-  applies it to a temporary copy of `evals/fixture_app/`, re-hits the fixture URL,
-  and records the result. Report four rates per condition (RAG-on and RAG-off):
-  explained (diagnosis matches `expected_cause`), fix proposed, patch applied
-  cleanly, verified.
-  The pass condition is the gap to close first. Fixtures are URLs, not tests, and
-  "no 500 on re-request" is too weak: a patch that wraps the view in
-  `try/except` passes it. Each fixture needs its own oracle (expected status
-  code plus a response assertion, or a small test per fixture) written before any
-  patch is generated.
-  Why it matters: a passing oracle is ground truth that no LLM judge can
-  misread, which answers the judge limitation recorded in `evals/README.md`
-  (correct source-derived details scored as fabrication). It also tests whether
-  RAG's measured value (specificity) carries through to correct fixes, or only
-  to more specific prose.
-  Scope: harness only. A fix-and-verify mode inside the package (patch, apply in
-  a worktree, rerun tests) is out of scope. It overlaps coding agents, which
-  already do this loop, it assumes a failing test exists for a live request, and
-  executing generated code conflicts with the package's human-reader positioning.
-  Sequencing: after the public write-up of the existing harness results, so this
-  can be a second write-up rather than competing with the first.
-  Verify: `evals/README.md` on `main` reports a verified-fix rate.
-
 - **rag-index-staleness-warning**: warn when the RAG index no longer matches the source
   on disk. Problem: `build_index()` is a full rebuild with no per-file mtime or hash, so
   after edits the index serves old source and old line ranges until someone rebuilds,
@@ -402,6 +450,9 @@ Sequencing below follows from that.
   stitches explanatory prose badly across the boundary; scaling the cap to traceback length is
   backwards, since a 200-frame traceback usually needs a shorter explanation than a subtle
   two-frame one.
+- **Issue template asking users to paste tracebacks that got bad explanations.** A
+  traceback without the project source cannot be retrieved against, and it has no ground
+  truth for the judge. real-world-fixtures gets real-world cases without either problem.
 
 ## Loose ends (not tasks)
 Fold each into whichever branch already touches the relevant file.
