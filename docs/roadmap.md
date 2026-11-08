@@ -145,9 +145,19 @@ baseline. Nothing in this queue is shipped.
    diff. Fetching needs network at harness time only; the unit test suite stays offline per
    `CLAUDE.md`. Checkouts go in a gitignored cache directory.
    Leakage: the fix commit and the issue text must never be indexed. Apply the
-   fixture-leakage audit rules (LEAK / HINT / REALISTIC) to the pinned source before a
-   fixture is accepted. Keep the fix diff and issue text outside the checked-out tree, so
-   the index build cannot reach them.
+   fixture-leakage audit rules (from the 2026-10-14 fixture leakage audit) to the pinned
+   source before a fixture is accepted:
+   - LEAK: indexed text that states the fix or names the bug (for example a commented-out
+     correct line, or a comment describing the bug). Remove.
+   - HINT: text that points toward the cause without stating it (for example seed comments
+     or harness meta-text describing the fixture). Remove.
+   - REALISTIC: code that would exist in a real project even though it helps retrieval (for
+     example sibling `get_object_or_404` usage elsewhere in the app). Keep; this is
+     legitimate grounding.
+   For real-world fixtures, pinned pre-fix source is REALISTIC by default; still audit it
+   for comments that reference the issue.
+   Keep the fix diff and issue text outside the checked-out tree, so the index build cannot
+   reach them.
    Layout: a directory of its own (for example `evals/real_world/`), separate from the
    synthetic fixtures. Report results for both sets separately in `evals/README.md`. Never
    merge them into one headline number.
@@ -283,8 +293,9 @@ baseline. Nothing in this queue is shipped.
   code is dropped from `.py` files that have a top-level def. Pinned-frame-retrieval fixes
   the failing frame only, not vector search.
   Works without the `[rag]` extra installed.
-  Separate knob: lowering `EXPLAIN_ERRORS_RAG_TOP_K` is tested in the same harness run
-  (see retrieval-arms-eval), not bundled into this change.
+  Separate knob: lowering `EXPLAIN_ERRORS_RAG_TOP_K` is not tested in retrieval-arms-eval,
+  and is not bundled into this change. Revisit only if arm (c) wins with a token cost
+  noticeably higher than (a).
   Depends on the loose end about two frame classifiers (`_is_project_path` versus the
   `tracebacks.py` heuristic): choosing the failing project frame needs one answer to
   "which frames are project frames", so consolidate first or in the same branch.
