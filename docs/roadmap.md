@@ -19,15 +19,19 @@ not live here and they do not live in `CLAUDE.md`.
 
 ## Positioning
 The package is a Django learning aid for humans, not an error explainer for agents.
-Explanations are grounded in the user's own code and (planned) the official Django docs.
+Explanations are grounded in the user's own code; links to the official Django docs are
+planned (django-docs-links).
 "AI error explainer" is a commoditized category; "grounded Django learning aid" is not.
 Sequencing below follows from that.
 
 ## Sequenced queue
 
-Sequencing: harness items come before product items because the judge must be validated
-before arms are compared, and each run changes one variable relative to the previous
-baseline. Nothing in this queue is shipped.
+Sequencing: judge validation and retrieval comparison come first, then
+pinned-frame-retrieval as the product payoff of the arms eval, then eval-fix-validity, then
+small user-facing items, then docs links. The judge must be validated before arms are
+compared, and each run changes one variable relative to the previous baseline.
+model-retirement-migration is partly shipped (0.11.1 added the `max_completion_tokens`
+fallback for reasoning models); the package default is still a retiring model.
 
 1. **model-retirement-migration** (deadline 2027-01-14, hard): OpenAI retires `gpt-4o`,
    `gpt-4o-mini`, `gpt-4.1`, and `gpt-4.1-mini` on 2027-01-14. Calls to these models fail
@@ -65,6 +69,11 @@ baseline. Nothing in this queue is shipped.
    judge-retrieved-context. Record it as such once it exists; until then no replacement
    baseline exists.
    Sequencing: one variable per run. Do not combine this with judge-retrieved-context.
+   Remaining work: change the `OPENAI_MODEL` default in `explain_errors/middleware.py` (still
+   `gpt-4o-mini` on `main`), then the full gpt-6-luna run against Evals #9.
+   Prerequisite for that run: fix the eval harness so generation failures (API errors, empty
+   content) are recorded as failures, not judged as ties. Report the failure count separately
+   in the results JSON.
    Verify: `grep -rnE "gpt-4o|gpt-4\.1" explain_errors/ evals/ README.md tests/` on `main`
    returns no match for a retiring model ID (the Evals #9 baseline record excepted).
 
@@ -131,7 +140,38 @@ baseline. Nothing in this queue is shipped.
    the agreement rates in `evals/README.md` next to the results they qualify.
    Verify: `evals/README.md` on `main` reports a judge-human agreement rate.
 
-4. **real-world-fixtures** (harness work, not started): add fixtures drawn from real
+4. **overlap-stratified-results** (harness work): measure the judge/retriever overlap bias
+   instead of only caveating it.
+   The judge checks claims against the failing function's source (`_build_judge_source` in
+   `evals/run.py`), which RAG-on often retrieves too, so part of RAG-on's `no_fabrication`
+   advantage may come from the judge and generator sharing material RAG-off never sees.
+   `evals/README.md` lists this as a limitation; this entry turns it into a measurement.
+   Gap: call records in the results file store the explanation, traceback, latency, and
+   tokens, but not which chunks RAG-on retrieved.
+   Shape:
+   - Record, for every RAG-on call, the retrieved chunks' file paths and line ranges in the
+     results file. Capture them through a logger record emitted by the retriever rather than
+     by patching another internal function, to avoid adding a second coupling like the
+     existing `sanitize_traceback` patch (see the loose end on that).
+   - Also record each candidate chunk's rank before the `TOP_K` cut, so retrieval-arms-eval can
+     report ranking misses (see cross-encoder-reranking).
+   - Mark a comparison as "overlap" when any retrieved chunk intersects any segment of the
+     judge's source section (the failing function, the `urls.py` route, named templates,
+     and any config settings added by judge-retrieved-context): same file and intersecting
+     line range. Otherwise "no overlap".
+   - Report `no_fabrication` and `points_to_fix_location` yes counts and win counts split by
+     group and by overlap. Report raw counts, not percentages: with 45 comparisons, some
+     cells will be too small for a rate to mean anything.
+   Reading the result: if RAG-on still wins on no-overlap comparisons, the overlap is not
+   what drives its advantage. If the advantage disappears there, say so in `evals/README.md`
+   and restate the headline result accordingly.
+   Sequencing: after judge-retrieved-context, so overlap is measured against the judge
+   inputs that will actually be used.
+   Prerequisite for retrieval-arms-eval, which reports each arm split by overlap.
+   Credit: suggested by a reader of the eval write-up.
+   Verify: `evals/README.md` on `main` reports results split by overlap.
+
+5. **real-world-fixtures** (harness work, not started): add fixtures drawn from real
    projects, so results do not rest only on synthetic cases written for the harness.
    Source: public Django repos with a permissive license where a GitHub issue contains a
    traceback and a linked commit fixes it.
@@ -165,7 +205,7 @@ baseline. Nothing in this queue is shipped.
    retrieval-arms-eval.
    Verify: `evals/README.md` on `main` reports a run on the real-world set.
 
-5. **retrieval-arms-eval** (harness work): compare retrieval combinations before building
+6. **retrieval-arms-eval** (harness work): compare retrieval combinations before building
    any of them. Arms:
    - (a) RAG as shipped, the baseline.
    - (b) ast only: pinned frame, no index.
@@ -190,6 +230,11 @@ baseline. Nothing in this queue is shipped.
    judge-retrieved-context).
    Record win rate, tokens, latency, and cost per arm in `evals/README.md`.
    Report each arm's results split by overlap, per overlap-stratified-results.
+   Also report, for each arm and each fixture, where the `expected_fix_location` chunk landed:
+   - retrieved within `TOP_K`;
+   - ranking miss (in the merged candidates but ranked below `TOP_K`);
+   - recall miss (not a candidate).
+   Report raw counts per arm.
    Arms (b) through (f) may be implemented harness-side or behind an internal switch;
    nothing user-facing ships from this entry.
    Decision rules:
@@ -201,7 +246,46 @@ baseline. Nothing in this queue is shipped.
    Run after judge-calibration-set, so the judge is validated before comparing arms.
    Verify: `evals/README.md` records a harness run comparing these arms.
 
-6. **eval-fix-validity**: a second eval track that asks whether the suggested fix
+7. **pinned-frame-retrieval**: the eval harness showed RAG-on can anchor on an adjacent
+   retrieved chunk instead of the one that matters. missing_post_key redirected the fix
+   to a retrieved template instead of the view.
+   Root cause (code read, Oct 2026): retrieval is vector similarity only. The innermost
+   project frame's file and line shape the query text but are never matched against the
+   stored `file_path`, `start_line` and `end_line`, so the chunk containing the failing
+   line is not guaranteed to be retrieved, and the one-chunk-per-file dedup can drop it.
+   Shape: at error time, read the failing project frame's file from disk, parse it with
+   `ast`, and find the smallest enclosing function, method, or class containing the failing
+   line. If nothing encloses it, or the file fails to parse, fall back to a line window
+   around the line. Pin that source first in the prompt, labeled as the failing location,
+   ahead of the vector search results. Drop vector results that overlap the pinned range.
+   KNN results still follow, since the cause is often in related code the traceback does
+   not name (a form, a template, a model).
+   Why it reads from disk instead of querying the index by file and line:
+   - Index line numbers drift after edits until the index is rebuilt, and `build_index()`
+     is a full rebuild with no per-file mtime or hash.
+   - Module-level lines have no chunk: a `.py` file with at least one top-level def drops
+     its module-level code.
+   - A method would return its whole class, since Python chunks are top-level defs only.
+   Indexer gap this does not fix: vector chunks are whole top-level classes (precision
+   loss, and possible embedding input-limit failure on large classes), and module-level
+   code is dropped from `.py` files that have a top-level def. Pinned-frame-retrieval fixes
+   the failing frame only, not vector search.
+   Works without the `[rag]` extra installed.
+   Separate knob: lowering `EXPLAIN_ERRORS_RAG_TOP_K` is not tested in retrieval-arms-eval,
+   and is not bundled into this change. Revisit only if arm (c) wins with a token cost
+   noticeably higher than (a).
+   Depends on the loose end about two frame classifiers (`_is_project_path` versus the
+   `tracebacks.py` heuristic): choosing the failing project frame needs one answer to
+   "which frames are project frames", so consolidate first or in the same branch.
+   Resolve before starting (owner decisions, no defaults chosen here):
+   - (a) Innermost project frame only, or every project frame.
+   - (b) Fallback line window size.
+   Test with the harness before and after. missing_post_key is the target case.
+   Gated: ships only if arm (c) beats arm (a) in retrieval-arms-eval.
+   Verify: the retriever path on `main` runs the `ast` pinned-frame lookup by default, with
+   no switch or flag gating it.
+
+8. **eval-fix-validity**: a second eval track that asks whether the suggested fix
    works, not just whether the explanation reads better. For each fixture, the
    harness (not the package) turns the explanation's suggested fix into a patch,
    applies it to a temporary copy of `evals/fixture_app/`, re-hits the fixture URL,
@@ -222,126 +306,71 @@ baseline. Nothing in this queue is shipped.
    a worktree, rerun tests) is out of scope. It overlaps coding agents, which
    already do this loop, it assumes a failing test exists for a live request, and
    executing generated code conflicts with the package's human-reader positioning.
-   Sequencing: after the public write-up of the existing harness results, so this
-   can be a second write-up rather than competing with the first.
    Relates to: real-world-fixtures, whose stored fix diffs serve as ground truth here.
    Verify: `evals/README.md` on `main` reports a verified-fix rate.
 
-7. **django-docs-links**: cross-reference explanations to official Django documentation.
-   Ship the cheap version first: a static map of exception type plus context to a docs
-   anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
-   generated prose is not, which matters most for the learning audience and shrinks the
-   hallucination surface.
-   Ships after debug page injection so links render clickable in the browser
-   rather than as text in stdout.
-   Resolve before starting:
-   - Django docs license terms for redistributing a derived map or index.
-   - Version pinning. URLs carry a version segment, and serving 5.2 links to a user on 4.2
-     is worse than no link.
-   - Translated docs coverage, now that `EXPLAIN_ERRORS_LANGUAGE` has shipped.
-     `docs.djangoproject.com` has translations with uneven coverage, so a localized link may
-     404 or silently fall back.
-   Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
+9. **README restructure**: move the "Debug page injection" section up, next to
+   Usage, and trim Usage step 2, which repeats it; reduce "Async Support" to
+   one line in Features; group the Configuration table by purpose (provider,
+   output, limits, redaction, language); shorten the tokenizer detail in
+   "Explanation language"; add a Requirements line (Python 3.9+, Django 4.2+);
+   give Contributing the dev setup and test command; remove changelog
+   wording ("no longer needs to be last", the "Upgrading" paragraph in Debug
+   page injection). Also re-record the "Before / after" RAG example on the
+   current version, since its traceback-only side predates 0.7.0, and drop
+   the note that says so. It documents shipped behavior and can go any time.
+   To avoid rewriting the README twice: if README positioning rewrite is in
+   flight, fold both into one PR.
+   Verify: README.md has a Requirements line and the "Debug page injection"
+   section appears before "Async Support".
 
-8. **README positioning rewrite**: after django-docs-links, when the learning-aid claim is
-   backed by shipped behavior. Not before. The README documents shipped behavior; anything
-   earlier is a promise that has to be kept.
-   Verify: the README lead paragraph describes a grounded Django learning aid rather than an
-   error explainer.
+10. **editor-open-links**: in the injected debug page, render each traceback frame (and each
+    source file cited by retrieval) as an "open in editor" link to that file and line. Use a
+    configurable URL template setting, for example
+    `EXPLAIN_ERRORS_EDITOR_URL = "vscode://file/{path}:{line}"`, following the pattern used by
+    Werkzeug and django-extensions. The setting defaults to off, and links only render when
+    DEBUG is on. A small addition that helps the developer navigate from the explanation to
+    their own code, it fits the "learning aid grounded in user code" positioning and needs no
+    editor extension.
+    Verify: `grep -rn "EXPLAIN_ERRORS_EDITOR_URL" explain_errors/` on `main` returns a match.
 
-   - **Production Safety section**: document the safe middleware registration pattern
-     (register only when `DEBUG` is on) plus a CI guard (`manage.py check --deploy`) against
-     shipping the middleware to production by accident. Lands on its own branch and commit,
-     ahead of the rest of the positioning rewrite.
-     Verify: `README.md` on `main` has a `## Production Safety` heading.
+11. **django-docs-links**: cross-reference explanations to official Django documentation.
+    Ship the cheap version first: a static map of exception type plus context to a docs
+    anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
+    generated prose is not, which matters most for the learning audience and shrinks the
+    hallucination surface.
+    Resolve before starting:
+    - Django docs license terms for redistributing a derived map or index.
+    - Version pinning. URLs carry a version segment, and serving 5.2 links to a user on 4.2
+      is worse than no link.
+    - Translated docs coverage, now that `EXPLAIN_ERRORS_LANGUAGE` has shipped.
+      `docs.djangoproject.com` has translations with uneven coverage, so a localized link may
+      404 or silently fall back.
+    Sequencing: placed after editor-open-links and README restructure because its three
+    resolve-before-starting questions make it costlier than it looks, and it adds little eval
+    or retrieval signal.
+    Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
 
-9. **editor-open-links**: in the injected debug page, render each traceback frame (and each
-   source file cited by retrieval) as an "open in editor" link to that file and line. Use a
-   configurable URL template setting, for example
-   `EXPLAIN_ERRORS_EDITOR_URL = "vscode://file/{path}:{line}"`, following the pattern used by
-   Werkzeug and django-extensions. The setting defaults to off, and links only render when
-   DEBUG is on. A small addition that helps the developer navigate from the explanation to
-   their own code, it fits the "learning aid grounded in user code" positioning and needs no
-   editor extension.
-   Sequencing: after the eval harness dev.to article.
-   Verify: `grep -rn "EXPLAIN_ERRORS_EDITOR_URL" explain_errors/` on `main` returns a match.
+12. **README positioning rewrite**: after retrieval-arms-eval, describing whatever retrieval
+    behavior has shipped by then (the outcome of the retrieval-default open question may change
+    the positioning text). Not before. The README documents shipped behavior; anything
+    earlier is a promise that has to be kept.
+    Verify: the README lead paragraph describes a grounded Django learning aid rather than an
+    error explainer.
 
 ## Conditional or unscheduled
 
-- **pinned-frame-retrieval**: the eval harness showed RAG-on can anchor on an adjacent
-  retrieved chunk instead of the one that matters. missing_post_key redirected the fix
-  to a retrieved template instead of the view.
-  Root cause (code read, Oct 2026): retrieval is vector similarity only. The innermost
-  project frame's file and line shape the query text but are never matched against the
-  stored `file_path`, `start_line` and `end_line`, so the chunk containing the failing
-  line is not guaranteed to be retrieved, and the one-chunk-per-file dedup can drop it.
-  Shape: at error time, read the failing project frame's file from disk, parse it with
-  `ast`, and find the smallest enclosing function, method, or class containing the failing
-  line. If nothing encloses it, or the file fails to parse, fall back to a line window
-  around the line. Pin that source first in the prompt, labeled as the failing location,
-  ahead of the vector search results. Drop vector results that overlap the pinned range.
-  KNN results still follow, since the cause is often in related code the traceback does
-  not name (a form, a template, a model).
-  Why it reads from disk instead of querying the index by file and line:
-  - Index line numbers drift after edits until the index is rebuilt, and `build_index()`
-    is a full rebuild with no per-file mtime or hash.
-  - Module-level lines have no chunk: a `.py` file with at least one top-level def drops
-    its module-level code.
-  - A method would return its whole class, since Python chunks are top-level defs only.
-  Indexer gap this does not fix: vector chunks are whole top-level classes (precision
-  loss, and possible embedding input-limit failure on large classes), and module-level
-  code is dropped from `.py` files that have a top-level def. Pinned-frame-retrieval fixes
-  the failing frame only, not vector search.
-  Works without the `[rag]` extra installed.
-  Separate knob: lowering `EXPLAIN_ERRORS_RAG_TOP_K` is not tested in retrieval-arms-eval,
-  and is not bundled into this change. Revisit only if arm (c) wins with a token cost
-  noticeably higher than (a).
-  Depends on the loose end about two frame classifiers (`_is_project_path` versus the
-  `tracebacks.py` heuristic): choosing the failing project frame needs one answer to
-  "which frames are project frames", so consolidate first or in the same branch.
-  Resolve before starting (owner decisions, no defaults chosen here):
-  - (a) Innermost project frame only, or every project frame.
-  - (b) Fallback line window size.
-  Test with the harness before and after. missing_post_key is the target case. Ship
-  gated by the decision rule in retrieval-arms-eval.
-  Verify: the retriever path on `main` runs the `ast` pinned-frame lookup by default, with
-  no switch or flag gating it.
-
-- **overlap-stratified-results** (harness work): measure the judge/retriever overlap bias
-  instead of only caveating it.
-  The judge checks claims against the failing function's source (`_build_judge_source` in
-  `evals/run.py`), which RAG-on often retrieves too, so part of RAG-on's `no_fabrication`
-  advantage may come from the judge and generator sharing material RAG-off never sees.
-  `evals/README.md` lists this as a limitation; this entry turns it into a measurement.
-  Gap: call records in the results file store the explanation, traceback, latency, and
-  tokens, but not which chunks RAG-on retrieved.
-  Shape:
-  - Record, for every RAG-on call, the retrieved chunks' file paths and line ranges in the
-    results file. Capture them through a logger record emitted by the retriever rather than
-    by patching another internal function, to avoid adding a second coupling like the
-    existing `sanitize_traceback` patch (see the loose end on that).
-  - Mark a comparison as "overlap" when any retrieved chunk intersects any segment of the
-    judge's source section (the failing function, the `urls.py` route, named templates,
-    and any config settings added by judge-retrieved-context): same file and intersecting
-    line range. Otherwise "no overlap".
-  - Report `no_fabrication` and `points_to_fix_location` yes counts and win counts split by
-    group and by overlap. Report raw counts, not percentages: with 45 comparisons, some
-    cells will be too small for a rate to mean anything.
-  Reading the result: if RAG-on still wins on no-overlap comparisons, the overlap is not
-  what drives its advantage. If the advantage disappears there, say so in `evals/README.md`
-  and restate the headline result accordingly.
-  Sequencing: after judge-retrieved-context, so overlap is measured against the judge
-  inputs that will actually be used.
-  Credit: suggested by a reader of the eval write-up.
-  Verify: `evals/README.md` on `main` reports results split by overlap.
-
 - **cross-encoder-reranking** (conditional on retrieval-arms-eval, only if arm (f) wins
-  AND there is evidence that candidate ordering, not recall, is what limits results):
+  AND ordering limits results, meaning retrieval-arms-eval shows ranking misses outnumber
+  recall misses for arm (f)):
   rerank the merged keyword and vector candidates with a cross-encoder.
   Constraint: a local model behind an optional extra only, consistent with the existing
   rule that PyTorch is justified only by privacy. No hosted reranker API, since that sends
   the user's source to a third party.
-  Verify: an `extras_require` entry for a reranker exists in `setup.py`.
+  `sentence-transformers` (already in the local-embeddings extra) ships `CrossEncoder`, so a
+  reranker would likely reuse that extra instead of adding a new one.
+  Verify: a reranker module or setting exists under `explain_errors/rag/` on `main` (for
+  example a CrossEncoder import).
 
 - **jedi-dependency-resolution** (conditional on retrieval-arms-eval, only if arm (d)
   beats arm (c)): from the failing line, resolve referenced Python names to their
@@ -366,6 +395,11 @@ baseline. Nothing in this queue is shipped.
   answer when both sides of a mismatch are retrieved (a renamed model field plus the view still
   using the old name). The diff's distinct value, if any, is where current source alone
   is ambiguous: renamed versus deleted versus never existed.
+  Sequencing: after pinned-frame-retrieval. If pinned-frame-retrieval ships, the comparison
+  baseline is pinned-frame-retrieval, not vector RAG alone, since it already reads current
+  source from disk.
+  Re-read the Unproven note after retrieval-arms-eval; it depends on index freshness (see
+  rag-index-staleness-warning).
   Build the harness comparison first: 4 to 5 regression fixtures, each a working
   baseline plus a breaking uncommitted edit, including at least one where RAG alone
   plausibly succeeds. Give the judge the diff, or correct diff-derived details will
@@ -390,21 +424,6 @@ baseline. Nothing in this queue is shipped.
 - **Semantic retrieval over full Django docs**: same pipeline as the source-code index,
   pointed at a second corpus. Only if the static map in django-docs-links shows people want it.
   Verify: a second corpus or docs index target exists under `explain_errors/rag/` on `main`.
-
-- **README restructure**: move the "Debug page injection" section up, next to
-  Usage, and trim Usage step 2, which repeats it; reduce "Async Support" to
-  one line in Features; group the Configuration table by purpose (provider,
-  output, limits, redaction, language); shorten the tokenizer detail in
-  "Explanation language"; add a Requirements line (Python 3.9+, Django 4.2+);
-  give Contributing the dev setup and test command; remove changelog
-  wording ("no longer needs to be last", the "Upgrading" paragraph in Debug
-  page injection). Also re-record the "Before / after" RAG example on the
-  current version, since its traceback-only side predates 0.7.0, and drop
-  the note that says so. Coordinate with README positioning rewrite in the
-  sequenced queue: do this first, or fold both into one PR, so the README
-  is not rewritten twice.
-  Verify: README.md has a Requirements line and the "Debug page injection"
-  section appears before "Async Support".
 
 - **rag-index-staleness-warning**: warn when the RAG index no longer matches the source
   on disk. Problem: `build_index()` is a full rebuild with no per-file mtime or hash, so
@@ -562,8 +581,9 @@ Fold each into whichever branch already touches the relevant file.
   case for a real abstraction. Revisit only if a target provider appears that has no
   OpenAI-compatible surface.
 - Whether explain-errors-language plus django-docs-links is enough to carry the learning-aid
-  positioning, or whether it needs a third distinguishing feature before the README rewrite
-  is credible.
+  positioning, or whether it needs a third distinguishing feature. django-docs-links no longer
+  gates the README rewrite, so the rewrite describes only what has shipped by then, and this
+  question decides how strong a claim it can make.
 - **retrieval-default**: if ast only (or ast + Jedi) captures most of RAG's measured gain,
   consider making it the zero-setup default with RAG as opt-in, controlled by one setting
   (for example `EXPLAIN_ERRORS_RETRIEVAL`).
