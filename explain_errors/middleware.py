@@ -97,7 +97,7 @@ class ExplainErrorsMiddleware:
             self.throttle = SlidingWindowThrottle(max_calls, window_seconds)
 
             # Configurable via settings, with sensible defaults.
-            self.model = getattr(settings, "OPENAI_MODEL", "gpt-4o-mini")
+            self.model = getattr(settings, "OPENAI_MODEL", "gpt-6-luna")
             self.language = getattr(settings, "EXPLAIN_ERRORS_LANGUAGE", None)
 
             configured_max_tokens = getattr(settings, "OPENAI_MAX_TOKENS", None)

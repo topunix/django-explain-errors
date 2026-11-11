@@ -703,10 +703,10 @@ class FixtureSettingsModelTest(unittest.TestCase):
         self.assertEqual(self._model(OPENAI_MODEL="some-other-model"), "some-other-model")
 
     def test_unset_falls_back_to_default(self):
-        self.assertEqual(self._model(), "gpt-4o-mini")
+        self.assertEqual(self._model(), "gpt-6-luna")
 
     def test_empty_string_falls_back_to_default(self):
-        self.assertEqual(self._model(OPENAI_MODEL=""), "gpt-4o-mini")
+        self.assertEqual(self._model(OPENAI_MODEL=""), "gpt-6-luna")
 
 
 class EvalHarnessEndToEndTest(unittest.TestCase):
@@ -768,7 +768,7 @@ class EvalHarnessEndToEndTest(unittest.TestCase):
         self.assertGreaterEqual(data["timing"]["generator_seconds"], 0)
         self.assertGreaterEqual(data["timing"]["judge_seconds"], 0)
 
-        self.assertEqual(data["generator_model"], "gpt-4o-mini")
+        self.assertEqual(data["generator_model"], "gpt-6-luna")
         self.assertEqual(data["judge_model"], "judge-test-model")
         self.assertEqual(len(data["calls"]), 30)  # 15 fixtures x 2 RAG states x 1 run
         self.assertEqual(len(data["judgments"]), 15)

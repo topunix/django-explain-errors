@@ -16,8 +16,8 @@ Explains Django exceptions on the debug page, pointing at the real fix in your o
 </p>
 
 *The traceback held only Django and SQLite internals. With RAG enabled, the explanation names the
-failing function (`clone_latest_post`) and gives the one-line fix. Real `gpt-4o-mini` output from
-the eval harness.*
+failing function (`clone_latest_post`) and gives the one-line fix. Real output from the eval
+harness, generated with `gpt-4o-mini` (the default before `gpt-6-luna`).*
 
 - **Strongly recommended:** enable RAG over your project, so explanations name the actual file and function instead of guessing ([measured in the eval harness](#does-rag-actually-help)). It is off by default only because [setup](#codebase-aware-explanations-rag) takes three steps.
 - Works with OpenAI, Claude, or any OpenAI-compatible endpoint, including local models via Ollama
@@ -144,7 +144,7 @@ python manage.py check --deploy --fail-level WARNING
    In the terminal, the explanation is printed with the model that produced it:
 
    ```
-   Error explanation (gpt-4o-mini):
+   Error explanation (gpt-6-luna):
     The view raised a ValueError because ...
    ```
 
@@ -230,7 +230,7 @@ and keeps using that for later calls. Other providers keep receiving `max_tokens
 | ------------------ | -------- | ----------- |
 | `OPENAI_API_KEY` (env or settings) | Yes, unless `OPENAI_BASE_URL` points at an endpoint that does not authenticate | API key used to authenticate with the configured endpoint. Read first from the environment, then from `settings`. |
 | `DEBUG` | Yes | The middleware is only active when `DEBUG=True`. When `False`, requests pass through untouched. |
-| `OPENAI_MODEL` | No | Model used for explanations. Defaults to `gpt-4o-mini`. |
+| `OPENAI_MODEL` | No | Model used for explanations. Defaults to `gpt-6-luna` (was `gpt-4o-mini`). If you set `OPENAI_MODEL` yourself, the default change does not affect you, but OpenAI retires `gpt-4o`, `gpt-4o-mini`, `gpt-4.1`, and `gpt-4.1-mini` on 2027-01-14, after which calls to them fail. |
 | `OPENAI_MAX_TOKENS` | No | Ceiling on tokens generated for the explanation, not a target — the system prompt itself asks for a concise answer. Defaults to `1000`; scales up automatically when `EXPLAIN_ERRORS_LANGUAGE` is set (see below), unless you set this explicitly, which always overrides the scaling. |
 | `OPENAI_TIMEOUT` | No | Request timeout in seconds for model API calls. Defaults to `10`. |
 | `OPENAI_MAX_TRACEBACK_CHARS` | No | Total character budget for the traceback sent to the model. Application frames (your own code, as opposed to Django, the standard library, or installed packages) are always kept; library frames fill whatever budget remains, nearest the raise point first, with an `... N library frames omitted ...` line where frames are dropped. If the application frames alone exceed the budget, falls back to keeping the last N characters of the raw traceback. Defaults to `3000`. |
@@ -275,7 +275,7 @@ OPENAI_API_KEY = "your_anthropic_api_key_here"
 OPENAI_MODEL = "..."  # see Anthropic's current model list below
 ```
 
-`OPENAI_MODEL` is mandatory here: the default (`gpt-4o-mini`) doesn't exist on Anthropic's API
+`OPENAI_MODEL` is mandatory here: the default (`gpt-6-luna`) doesn't exist on Anthropic's API
 and will 404. Use one of the model names from
 [Anthropic's model overview](https://platform.claude.com/docs/en/about-claude/models/overview);
 model names are versioned and retired over time, so check that page rather than relying on a
@@ -519,9 +519,8 @@ generated, so the extra headroom costs nothing if unused. Setting `OPENAI_MAX_TO
 explicitly always overrides this scaling, at any value, including one lower than the
 unscaled 1,000 default. The multiplier itself is deliberately generous rather than
 precise: the underlying tokens-per-word figures are estimates, not direct
-measurements, and the default model (`gpt-4o-mini`) uses the `o200k_base` tokenizer,
-which handles non-Latin scripts considerably better than the `cl100k_base`-era ratios
-these estimates lean on.
+measurements, and tokenizers differ across models and providers, so treat the
+multiplier as a generous ceiling rather than a calibrated figure.
 
 ## Codebase-aware explanations (RAG)
 
@@ -744,7 +743,7 @@ Most of the gap comes from two checks, measured on the 10 fixtures whose cause i
 - **Points to the right file and function:** RAG-on 26, RAG-off 13
 - **Avoids invented details:** RAG-on 26, RAG-off 17
 
-Without your source, gpt-4o-mini tends to invent a plausible function name or parameter rather than admit it doesn't know. With the real code in front of it, it mostly doesn't.
+Without your source, `gpt-4o-mini` (the generator in these runs, the default before `gpt-6-luna`) tends to invent a plausible function name or parameter rather than admit it doesn't know. With the real code in front of it, it mostly doesn't.
 
 **Limitations:**
 

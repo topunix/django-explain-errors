@@ -30,54 +30,8 @@ Sequencing: judge validation and retrieval comparison come first, then
 pinned-frame-retrieval as the product payoff of the arms eval, then eval-fix-validity, then
 small user-facing items, then docs links. The judge must be validated before arms are
 compared, and each run changes one variable relative to the previous baseline.
-model-retirement-migration is partly shipped (0.11.1 added the `max_completion_tokens`
-fallback for reasoning models); the package default is still a retiring model.
 
-1. **model-retirement-migration** (deadline 2027-01-14, hard): OpenAI retires `gpt-4o`,
-   `gpt-4o-mini`, `gpt-4.1`, and `gpt-4.1-mini` on 2027-01-14. Calls to these models fail
-   after that date.
-   Audit of references on `main` at a42880f (2026-10-15). Rerun the grep, since this list
-   goes stale:
-   - Package default: `explain_errors/middleware.py` line 96 (`gpt-4o-mini` is the
-     `OPENAI_MODEL` default). The only code default in the package.
-   - Evals code: `evals/run.py` lines 186-187 (price table keys `gpt-4o-mini` and `gpt-4o`;
-     no `gpt-4.1` entries) and line 756 (`generator_model` fallback `gpt-4o-mini`).
-   - Evals docs: `evals/README.md` line 57 (measured-run description) and line 86
-     (`OPENAI_MODEL` default).
-   - Evals config: `evals/fixture_app/settings.py` carries the `gpt-4o-mini` fallback literal
-     (`OPENAI_MODEL` env var, empty means default); `evals/README.md` and
-     `tests/test_eval_run.py` repeat it. `.github/workflows/evals.yml` names no model: the
-     `generator_model` input chooses one.
-   - `README.md`: lines 19, 147, 229, 274, 518, 743.
-   - Tests: `tests/test_print_stdout.py` lines 36, 55, 86; `tests/test_debug_page.py` line
-     168; `tests/test_middleware.py` lines 271, 324; `tests/test_eval_run.py` lines 206, 209,
-     487.
-   - `CHANGELOG.md`: no references. `docs/`: this file only.
-   - No reference to `gpt-4.1` or `gpt-4.1-mini` exists anywhere on `main`. `gpt-4o` appears
-     only in the price table.
-   Package default: `gpt-4o-mini` is a retiring model, so changing the default is a
-   user-facing behavior change. It needs a CHANGELOG entry and a release before 2027-01-14.
-   It is a deliberate exception to invariant 5 (default behavior for existing users must not
-   change); record that in `CLAUDE.md` when it ships. Users who set `OPENAI_MODEL` themselves
-   are unaffected by the default but still need the README to say so.
-   Evals: the baseline is Evals #9 (commit a42880f; generator `gpt-4o-mini`, judge
-   `anthropic/claude-sonnet-5`, runs=3, seed=42; RAG-on 37, RAG-off 4, ties 4). Choose the
-   successor generator by running the harness with the judge, seed, and fixtures held
-   constant, then compare against Evals #9. Keep the Evals #9 results file referenced as the
-   pre-migration baseline; do not overwrite or delete it.
-   The gpt-6-luna run, compared against Evals #9, becomes the new baseline for
-   judge-retrieved-context. Record it as such once it exists; until then no replacement
-   baseline exists.
-   Sequencing: one variable per run. Do not combine this with judge-retrieved-context.
-   Remaining work: change the `OPENAI_MODEL` default in `explain_errors/middleware.py` (still
-   `gpt-4o-mini` on `main`), then the full gpt-6-luna run against Evals #9.
-   Prerequisite for that run: fix the eval harness so generation failures (API errors, empty
-   content) are recorded as failures, not judged as ties. Report the failure count separately
-   in the results JSON.
-   Verify: `grep -rnE "gpt-4o|gpt-4\.1" explain_errors/ evals/ README.md tests/` on `main`
-   returns no match for a retiring model ID (the Evals #9 baseline record excepted).
-
-2. **judge-retrieved-context** (harness work): let the judge verify claims that come from
+1. **judge-retrieved-context** (harness work): let the judge verify claims that come from
    project source the generator read but the judge was not shown.
    Problem, corrected against `main` (a42880f): the judge is not limited to the traceback
    and known facts. `evals/judge.py` already has a "Relevant project source" section, built
@@ -99,7 +53,7 @@ fallback for reasoning models); the package default is still a retiring model.
    so no secret-bearing settings reach the judge provider).
    Rejected: passing RAG-on's retrieved chunks only with the RAG-on answer. It reveals which
    side is RAG-on and undermines the A/B position randomization.
-   Comparability: changing judge inputs breaks comparison with Evals #9. A new baseline run
+   Comparability: changing judge inputs breaks comparison with the gpt-6-luna baseline and Evals #9. A new baseline run
    is required after this lands, and judge-calibration-set agreement should be re-checked
    because the judge prompt inputs changed.
    Also: record the judge's evidence per run. Write each fixture's judge source section (the
@@ -109,16 +63,24 @@ fallback for reasoning models); the package default is still a retiring model.
    or a refactor of `_build_judge_source` would shift it silently). Land this with the source
    section change so the new baseline is the first run with recorded judge inputs.
    Credit: suggested by a reader of the eval write-up.
-   Sequencing: do not combine this with model-retirement-migration in a single run. Change
-   one variable at a time. Its comparison point is the model-retirement-migration run, not
-   Evals #9.
+   Baseline: the gpt-6-luna run (results file `20261022T005116Z.json`, commit 6c01b59;
+   generator `gpt-6-luna`, judge `anthropic/claude-sonnet-5`, runs=3, seed=42, all 15
+   fixtures) is the baseline for this change. RAG-on 28, RAG-off 7, ties 9, 1 judge failure,
+   0 generation failures. With RAG, quality is at parity with Evals #9 (no_fabrication 39/44
+   vs 39/45, fix_would_work 43/44 vs 44/45); without RAG, gpt-6-luna is better
+   (no_fabrication 28 vs 26, points_to_fix_location 28 vs 22). Generator cost per full run
+   $0.0150 vs $0.0195; latency about 25% slower in a same-machine probe (p50 3.89s vs 3.14s).
+   Evals #9 (commit a42880f; generator `gpt-4o-mini`; RAG-on 37, RAG-off 4, ties 4) stays
+   referenced as the pre-migration baseline; do not overwrite or delete its results file.
+   Sequencing: change one variable at a time, so do not combine this with a generator model
+   change. Its comparison point is the gpt-6-luna run, not Evals #9.
    Relates to: retrieval-arms-eval, whose "give the judge the retrieved context for every
    arm" requirement builds on this entry and may need more for arms with new context sources.
    Verify: `_build_judge_source` in `evals/run.py` on `main` adds the config file named by
    `expected_fix_location` (for missing_tag_library, the `INSTALLED_APPS` setting).
    Verify: results JSON from an Evals run on `main` records the judge source section (or its sha256) per fixture.
 
-3. **judge-calibration-set** (harness work): measure how often the judge agrees with a
+2. **judge-calibration-set** (harness work): measure how often the judge agrees with a
    human, instead of assuming it.
    `evals/spotcheck.py` covers one failure direction only: claims marked "contradicted"
    that still name real source identifiers, on a filtered sample. It never checks claims
@@ -140,7 +102,7 @@ fallback for reasoning models); the package default is still a retiring model.
    the agreement rates in `evals/README.md` next to the results they qualify.
    Verify: `evals/README.md` on `main` reports a judge-human agreement rate.
 
-4. **overlap-stratified-results** (harness work): measure the judge/retriever overlap bias
+3. **overlap-stratified-results** (harness work): measure the judge/retriever overlap bias
    instead of only caveating it.
    The judge checks claims against the failing function's source (`_build_judge_source` in
    `evals/run.py`), which RAG-on often retrieves too, so part of RAG-on's `no_fabrication`
@@ -171,7 +133,7 @@ fallback for reasoning models); the package default is still a retiring model.
    Credit: suggested by a reader of the eval write-up.
    Verify: `evals/README.md` on `main` reports results split by overlap.
 
-5. **real-world-fixtures** (harness work, not started): add fixtures drawn from real
+4. **real-world-fixtures** (harness work, not started): add fixtures drawn from real
    projects, so results do not rest only on synthetic cases written for the harness.
    Source: public Django repos with a permissive license where a GitHub issue contains a
    traceback and a linked commit fixes it.
@@ -205,7 +167,7 @@ fallback for reasoning models); the package default is still a retiring model.
    retrieval-arms-eval.
    Verify: `evals/README.md` on `main` reports a run on the real-world set.
 
-6. **retrieval-arms-eval** (harness work): compare retrieval combinations before building
+5. **retrieval-arms-eval** (harness work): compare retrieval combinations before building
    any of them. Arms:
    - (a) RAG as shipped, the baseline.
    - (b) ast only: pinned frame, no index.
@@ -246,7 +208,7 @@ fallback for reasoning models); the package default is still a retiring model.
    Run after judge-calibration-set, so the judge is validated before comparing arms.
    Verify: `evals/README.md` records a harness run comparing these arms.
 
-7. **pinned-frame-retrieval**: the eval harness showed RAG-on can anchor on an adjacent
+6. **pinned-frame-retrieval**: the eval harness showed RAG-on can anchor on an adjacent
    retrieved chunk instead of the one that matters. missing_post_key redirected the fix
    to a retrieved template instead of the view.
    Root cause (code read, Oct 2026): retrieval is vector similarity only. The innermost
@@ -285,7 +247,7 @@ fallback for reasoning models); the package default is still a retiring model.
    Verify: the retriever path on `main` runs the `ast` pinned-frame lookup by default, with
    no switch or flag gating it.
 
-8. **eval-fix-validity**: a second eval track that asks whether the suggested fix
+7. **eval-fix-validity**: a second eval track that asks whether the suggested fix
    works, not just whether the explanation reads better. For each fixture, the
    harness (not the package) turns the explanation's suggested fix into a patch,
    applies it to a temporary copy of `evals/fixture_app/`, re-hits the fixture URL,
@@ -309,7 +271,7 @@ fallback for reasoning models); the package default is still a retiring model.
    Relates to: real-world-fixtures, whose stored fix diffs serve as ground truth here.
    Verify: `evals/README.md` on `main` reports a verified-fix rate.
 
-9. **README restructure**: move the "Debug page injection" section up, next to
+8. **README restructure**: move the "Debug page injection" section up, next to
    Usage, and trim Usage step 2, which repeats it; reduce "Async Support" to
    one line in Features; group the Configuration table by purpose (provider,
    output, limits, redaction, language); shorten the tokenizer detail in
@@ -324,7 +286,7 @@ fallback for reasoning models); the package default is still a retiring model.
    Verify: README.md has a Requirements line and the "Debug page injection"
    section appears before "Async Support".
 
-10. **editor-open-links**: in the injected debug page, render each traceback frame (and each
+9. **editor-open-links**: in the injected debug page, render each traceback frame (and each
     source file cited by retrieval) as an "open in editor" link to that file and line. Use a
     configurable URL template setting, for example
     `EXPLAIN_ERRORS_EDITOR_URL = "vscode://file/{path}:{line}"`, following the pattern used by
@@ -334,7 +296,7 @@ fallback for reasoning models); the package default is still a retiring model.
     editor extension.
     Verify: `grep -rn "EXPLAIN_ERRORS_EDITOR_URL" explain_errors/` on `main` returns a match.
 
-11. **django-docs-links**: cross-reference explanations to official Django documentation.
+10. **django-docs-links**: cross-reference explanations to official Django documentation.
     Ship the cheap version first: a static map of exception type plus context to a docs
     anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
     generated prose is not, which matters most for the learning audience and shrinks the
@@ -351,7 +313,7 @@ fallback for reasoning models); the package default is still a retiring model.
     or retrieval signal.
     Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
 
-12. **README positioning rewrite**: after retrieval-arms-eval, describing whatever retrieval
+11. **README positioning rewrite**: after retrieval-arms-eval, describing whatever retrieval
     behavior has shipped by then (the outcome of the retrieval-default open question may change
     the positioning text). Not before. The README documents shipped behavior; anything
     earlier is a promise that has to be kept.
