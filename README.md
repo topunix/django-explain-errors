@@ -519,8 +519,8 @@ generated, so the extra headroom costs nothing if unused. Setting `OPENAI_MAX_TO
 explicitly always overrides this scaling, at any value, including one lower than the
 unscaled 1,000 default. The multiplier itself is deliberately generous rather than
 precise: the underlying tokens-per-word figures are estimates, not direct
-measurements, and tokenizers differ across models and providers, so treat the
-multiplier as a generous ceiling rather than a calibrated figure.
+measurements, and tokenizers differ across models and providers, so the
+multiplier is not calibrated to any one of them.
 
 ## Codebase-aware explanations (RAG)
 
