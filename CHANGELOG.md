@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The default `OPENAI_MODEL` is now `gpt-6-luna` (was `gpt-4o-mini`, which OpenAI retires on 2027-01-14). Users who set `OPENAI_MODEL` are unaffected. `gpt-6-luna` rejects `max_tokens`, so the first explanation in each process makes one rejected call before falling back to `max_completion_tokens`.
+
 ## 0.11.1 (2026-10-20)
 
 ### Fixed

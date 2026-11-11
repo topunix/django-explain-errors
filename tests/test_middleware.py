@@ -268,7 +268,7 @@ class ExplainErrorsMiddlewarePreserveDebugPageTest(SimpleTestCase):
         with patch("builtins.print") as mock_print:
             with self.assertRaises(ValueError):
                 mw(self.factory.get("/"))
-        mock_print.assert_any_call("Error explanation (gpt-4o-mini):\n", "Mocked explanation.")
+        mock_print.assert_any_call("Error explanation (gpt-6-luna):\n", "Mocked explanation.")
 
     @override_settings(EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False)
     def test_preserve_flag_explicitly_off_returns_json_500(self):
@@ -321,7 +321,7 @@ class OpenAICallConfigTest(SimpleTestCase):
         mw = ExplainErrorsMiddleware(lambda r: None)
         mw.process_exception(self.factory.get("/"), Exception("x"))
         kwargs = self.client.chat.completions.create.call_args.kwargs
-        self.assertEqual(kwargs["model"], "gpt-4o-mini")
+        self.assertEqual(kwargs["model"], "gpt-6-luna")
         self.assertEqual(kwargs["max_tokens"], DEFAULT_MAX_TOKENS)
 
     @override_settings(OPENAI_MODEL="gpt-5-mini", OPENAI_MAX_TOKENS=50)

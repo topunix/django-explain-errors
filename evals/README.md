@@ -54,8 +54,11 @@ nondeterministic.
 
 ## What it costs
 
-Measured on one `--runs 3` pass: `gpt-4o-mini` generator,
-`anthropic/claude-sonnet-5` judge via OpenRouter.
+Measured on one `--runs 3` pass: `gpt-4o-mini` generator (the pre-migration
+baseline, Evals #9), `anthropic/claude-sonnet-5` judge via OpenRouter. The
+same pass with a `gpt-6-luna` generator (results file `20261022T005116Z.json`,
+commit 6c01b59) had a generator cost of $0.0150 against $0.0195 for
+`gpt-4o-mini`. The table below is the `gpt-4o-mini` run (Evals #9).
 
 | Component | Calls | Cost |
 |---|---|---|
@@ -83,7 +86,7 @@ generator, and mixing them would defeat the point of an independent judge.
 |---|---|
 | `OPENAI_API_KEY` | required |
 | `OPENAI_BASE_URL` | optional, for an OpenAI-compatible endpoint |
-| `OPENAI_MODEL` | optional, defaults to `gpt-4o-mini` (read by `evals/fixture_app/settings.py`; an empty value also means the default) |
+| `OPENAI_MODEL` | optional, defaults to `gpt-6-luna` (read by `evals/fixture_app/settings.py`; an empty value also means the default) |
 
 **Judge** (independent client, see `evals/judge.py`):
 
@@ -200,7 +203,7 @@ branch and inputs:
 | `runs` | `3` | `--runs` |
 | `fixture` | empty (all fixtures) | `--fixture`, passed only when set. One fixture name. |
 | `seed` | empty (unseeded) | `--seed`, passed only when set. Must be an integer. |
-| `generator_model` | empty (default `gpt-4o-mini`) | `OPENAI_MODEL` env var, read by the fixture app settings. Empty means the default. |
+| `generator_model` | empty (default `gpt-6-luna`) | `OPENAI_MODEL` env var, read by the fixture app settings. Empty means the default. |
 
 **Download results:** open the run page and use the Artifacts section
 (`eval-results`, kept 90 days), or run

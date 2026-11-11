@@ -33,7 +33,7 @@ class PrintStdoutRequestCycleTest(SimpleTestCase):
             response = client.get("/boom/")
 
         self.assertEqual(response.status_code, 500)
-        mock_print.assert_any_call("Error explanation (gpt-4o-mini):\n", "Mocked explanation.")
+        mock_print.assert_any_call("Error explanation (gpt-6-luna):\n", "Mocked explanation.")
 
     @override_settings(OPENAI_MODEL="some-model")
     def test_configured_model_appears_in_stdout_prefix(self):
@@ -52,7 +52,7 @@ class PrintStdoutRequestCycleTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 500)
         for call in mock_print.call_args_list:
-            self.assertNotEqual(call.args[0], "Error explanation (gpt-4o-mini):\n")
+            self.assertNotEqual(call.args[0], "Error explanation (gpt-6-luna):\n")
         self.assertIn('id="explain-errors"', response.content.decode())
 
     @override_settings(EXPLAIN_ERRORS_PRINT_STDOUT=False)
@@ -83,7 +83,7 @@ class PrintStdoutRequestCycleTest(SimpleTestCase):
 
         self.assertEqual(response.status_code, 500)
         for call in mock_print.call_args_list:
-            self.assertNotEqual(call.args[0], "Error explanation (gpt-4o-mini):\n")
+            self.assertNotEqual(call.args[0], "Error explanation (gpt-6-luna):\n")
         self.assertIn('id="explain-errors"', response.content.decode())
 
 

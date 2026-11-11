@@ -113,6 +113,9 @@ RAG settings (all optional):
    `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` flips to default `True` under
    `preserve-mode-default` (see roadmap), and `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`
    defaults to `True` under `debug-page-injection`.
+   A third, deliberate exception: the default `OPENAI_MODEL` changed from
+   `gpt-4o-mini` to `gpt-6-luna` (2026-11-11), forced by OpenAI retiring
+   `gpt-4o-mini` on 2027-01-14.
 6. Supported: Python 3.9+, Django 4.2+.
 7. All externally transmitted or persistently indexed traceback text must
    pass through `explain_errors.sanitize.sanitize_traceback()`. This

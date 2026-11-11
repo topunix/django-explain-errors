@@ -185,6 +185,8 @@ def _build_judge_source(fixture, exception):
 # USD per 1K tokens. Best-effort, current as of this writing -- update when
 # it drifts enough to matter, or drop a model's entry to skip its estimate.
 PRICING_PER_1K_TOKENS = {
+    # Keep the gpt-4o-mini and gpt-4o entries: the pre-migration baseline
+    # (Evals #9) was generated with gpt-4o-mini and its cost is still estimated.
     "gpt-4o-mini": {"prompt": 0.00015, "completion": 0.0006},
     "gpt-4o": {"prompt": 0.0025, "completion": 0.01},
     # gpt-6-luna standard rates ($0.10 / $0.50 per 1M tokens), checked
@@ -870,7 +872,7 @@ def main(argv=None):
 
     from django.conf import settings
 
-    generator_model = getattr(settings, "OPENAI_MODEL", "gpt-4o-mini")
+    generator_model = getattr(settings, "OPENAI_MODEL", "gpt-6-luna")
 
     print("Resetting fixture app database...")
     _reset_database()

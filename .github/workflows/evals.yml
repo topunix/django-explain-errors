@@ -16,7 +16,7 @@ on:
         type: string
         default: ""
       generator_model:
-        description: "Generator model (OPENAI_MODEL). Empty uses the default, gpt-4o-mini."
+        description: "Generator model (OPENAI_MODEL). Empty uses the default, gpt-6-luna."
         type: string
         default: ""
 
