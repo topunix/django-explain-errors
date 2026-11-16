@@ -178,13 +178,14 @@ class ExplainErrorsMiddleware:
                 print("Error explanation: same error as an earlier one, replaying it.")
             self._inject_debug_page(request, explanation)
         elif self.throttle.allow():
-            prompt = self._build_prompt(exception)
+            cited = []
+            prompt = self._build_prompt(exception, cited)
             explanation = self._generate_explanation(prompt)
 
             if explanation is not None:
                 if key is not None:
                     self._cache_put(key, explanation)
-                self._inject_debug_page(request, explanation)
+                self._inject_debug_page(request, explanation, cited_files=cited)
 
         if getattr(settings, "EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE", True):
             return None
@@ -217,8 +218,12 @@ class ExplainErrorsMiddleware:
             while len(self._explanation_cache) > DEDUP_CACHE_SIZE:
                 self._explanation_cache.popitem(last=False)
 
-    def _build_prompt(self, exception):
-        """Build the user prompt: sanitized traceback, plus RAG context if enabled."""
+    def _build_prompt(self, exception, cited=None):
+        """Build the user prompt: sanitized traceback, plus RAG context if enabled.
+
+        When ``cited`` is a list, appends ``(file_path, start_line)`` for each
+        retrieved chunk whose header made it into the prompt.
+        """
         # Get the exception traceback, keeping application frames over
         # library internals to cap token usage and stay within the
         # model's context window.
@@ -244,6 +249,14 @@ class ExplainErrorsMiddleware:
                 rag_section = format_chunks_for_prompt(chunks, remaining_chars)
                 if rag_section:
                     prompt += f"\n\n{rag_section}"
+                    if cited is not None:
+                        for chunk in chunks:
+                            header = (
+                                f"--- {chunk['file_path']}:"
+                                f"{chunk['start_line']}-{chunk['end_line']} ---"
+                            )
+                            if header in rag_section:
+                                cited.append((chunk["file_path"], chunk["start_line"]))
             except EmbeddingIndexMismatchError as exc:
                 warn_index_mismatch_once(exc)
             except Exception as exc:
@@ -336,7 +349,7 @@ class ExplainErrorsMiddleware:
             print("Failed to get an explanation from the model API:", e)
         return explanation
 
-    def _inject_debug_page(self, request, explanation):
+    def _inject_debug_page(self, request, explanation, cited_files=None):
         """Wire the explanation into the debug page, if all conditions hold.
 
         Never overrides a user's own exception_reporter_class or a custom
@@ -367,6 +380,7 @@ class ExplainErrorsMiddleware:
                 return
 
             request._explain_errors_explanation = explanation
+            request._explain_errors_cited_files = cited_files
             request.exception_reporter_class = ExplainErrorsExceptionReporter
         except Exception:
             logger.warning(

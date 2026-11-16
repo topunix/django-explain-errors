@@ -95,6 +95,9 @@ decisions, unmet gates, or unmerged dependencies are skipped, not guessed.
    `explain_errors.debug_page.ExplainErrorsExceptionReporter`, in addition
    to stdout. Fails open and never overrides a user's own
    `exception_reporter_class` or a custom `DEFAULT_EXCEPTION_REPORTER`.),
+   `EXPLAIN_ERRORS_EDITOR_URL` (default `None`; off unless set. URL template
+   with `{path}` and `{line}`; adds "Open in editor" links to the injected
+   debug page banner, DEBUG only.),
    `EXPLAIN_ERRORS_PRINT_STDOUT` (default `True`; when `False`, skips only
    the stdout print of the explanation itself. The OpenAI-failure message
    always prints. Debug page injection and the JSON 500 response are
