@@ -54,8 +54,12 @@ printed to stdout (each controllable by its own setting). Active only when
 
 Roadmap lives at `docs/roadmap.md`. Read it before starting a task. It records
 decisions, not release state, and may be stale: check each item's "Verify" marker
-against the current tree before acting on it. When a task ships, delete its entry
-in the same PR that ships it.
+against the current tree before acting on it. The maintainer deletes a shipped entry after its PR merges. Task specs live
+in `docs/tasks/<slug>.md` and are deleted after the work lands.
+`/roadmap <items>` implements items unattended, one PR per item, each
+branched from `origin/main`. During a /roadmap run the committed task spec
+is the plan, so do not wait for confirmation. Items with unresolved owner
+decisions, unmet gates, or unmerged dependencies are skipped, not guessed.
 
 ## Invariants (do not break)
 
