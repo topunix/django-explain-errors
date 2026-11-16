@@ -191,7 +191,7 @@ EXPLAIN_ERRORS_EDITOR_URL = "vscode://file/{path}:{line}"
 EXPLAIN_ERRORS_EDITOR_URL = "pycharm://open?file={path}&line={line}"
 ```
 
-`{path}` is the absolute file path (percent-encoded, with `/`, `:` and `\\` left readable) and
+`{path}` is the absolute file path (percent-encoded, with `/`, `:` and `\` left readable) and
 `{line}` is the line number. A template with any other placeholder renders no links and logs
 one warning. Templates that produce a `javascript:`, `data:` or `vbscript:` URL are ignored.
 When the same error is replayed from the dedup cache, only the frame links are shown. Links
