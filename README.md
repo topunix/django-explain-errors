@@ -20,7 +20,7 @@ failing function (`clone_latest_post`) and gives the one-line fix. Real output f
 harness, generated with `gpt-4o-mini` (the default before `gpt-6-luna`).*
 
 - **Strongly recommended:** enable RAG over your project, so explanations name the actual file and function instead of guessing ([measured in the eval harness](#does-rag-actually-help)). It is off by default only because [setup](#codebase-aware-explanations-rag) takes three steps.
-- Works with OpenAI, Claude, or any OpenAI-compatible endpoint, including local models via Ollama
+- Works with OpenAI, Claude, Gemini, or any OpenAI-compatible endpoint, including local models via Ollama
 - Explanations in your language via `EXPLAIN_ERRORS_LANGUAGE`, with code and identifiers kept in English
 - Sync and async views, traceback redaction, rate limiting
 - Local development only: requires `DEBUG = True`
@@ -45,8 +45,8 @@ better. This package is not trying to compete there.
   (recommended; see "Codebase-aware explanations" below)
   - Local embeddings via an optional extra: your codebase is indexed on your machine and never uploaded to an embeddings provider (only the traceback and a few relevant snippets reach your chat model; see [Privacy](#privacy))
   - Separate embeddings provider config, so Anthropic users can use RAG
-- Explains errors using OpenAI out of the box, Anthropic's Claude models, or any other
-  OpenAI-compatible endpoint (Ollama, LM Studio, Azure, gateways) via `OPENAI_BASE_URL`,
+- Explains errors using OpenAI out of the box, Anthropic's Claude models, Google's Gemini
+  models, or any other OpenAI-compatible endpoint (Ollama, LM Studio, Azure, gateways) via `OPENAI_BASE_URL`,
   including fully local models, so no code has to leave your machine
 - Explanations in your language via `EXPLAIN_ERRORS_LANGUAGE`, with exception names,
   identifiers, and code kept in English
@@ -352,6 +352,51 @@ entirely. Against a real remote endpoint such as Anthropic's, that placeholder i
 and rejected, so a missing `OPENAI_API_KEY` shows up as an opaque `401 Unauthorized` rather
 than a clear configuration error. If you see a 401 with `OPENAI_BASE_URL` pointed at a remote
 provider, check that `OPENAI_API_KEY` — not a provider-specific variable — is actually set.
+
+## Using Google Gemini models
+
+Google's Gemini models work through Google's OpenAI-compatible endpoint, with no
+Gemini-specific code required:
+
+```python
+OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+OPENAI_API_KEY = "your_gemini_api_key_here"
+OPENAI_MODEL = "..."  # see Google's current model list
+```
+
+`OPENAI_MODEL` is mandatory here: the default (`gpt-6-luna`) doesn't exist on Google's API.
+Use one of the model names from
+[Google's model list](https://ai.google.dev/gemini-api/docs/models); model names are
+versioned and retired over time, so check that page rather than relying on a name pinned
+here. The models list endpoint can return IDs that the API then rejects as retired for new
+users, so prefer the documentation page when picking a name.
+
+Gemini thinking models spend part of the token budget, and a good deal of time, on reasoning
+before producing visible output. At the defaults, the explanation can come back truncated
+or the request can time out. Raise both `OPENAI_MAX_TOKENS` and `OPENAI_TIMEOUT` for these
+models (see the reasoning-model note in
+[Using Anthropic](#using-anthropic-claude-models)). Lighter, non-thinking models fit within
+the defaults.
+
+### RAG with Gemini
+
+Unlike Anthropic, the same Gemini endpoint also serves embeddings, so one key covers chat and
+the [RAG layer](#codebase-aware-explanations-rag), and `EXPLAIN_ERRORS_RAG_EMBED_BASE_URL` is
+not needed. Set `EXPLAIN_ERRORS_RAG_EMBED_MODEL` to a Gemini embedding model:
+
+```python
+OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+OPENAI_API_KEY = "your_gemini_api_key_here"
+OPENAI_MODEL = "..."
+
+EXPLAIN_ERRORS_RAG_ENABLED = True
+EXPLAIN_ERRORS_RAG_EMBED_MODEL = "gemini-embedding-001"
+```
+
+Rebuild the index after switching, because stored vectors are model-specific.
+`gemini-embedding-001` produces 3072-dimension vectors, so the index is larger than one
+built with the default embedding model. Indexed source chunks are sent to Google's embeddings
+endpoint (after redaction).
 
 ## Privacy
 
