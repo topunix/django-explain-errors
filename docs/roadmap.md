@@ -285,17 +285,7 @@ compared, and each run changes one variable relative to the previous baseline.
    Verify: README.md has a Requirements line and the "Debug page injection"
    section appears before "Async Support".
 
-9. **editor-open-links**: in the injected debug page, render each traceback frame (and each
-    source file cited by retrieval) as an "open in editor" link to that file and line. Use a
-    configurable URL template setting, for example
-    `EXPLAIN_ERRORS_EDITOR_URL = "vscode://file/{path}:{line}"`, following the pattern used by
-    Werkzeug and django-extensions. The setting defaults to off, and links only render when
-    DEBUG is on. A small addition that helps the developer navigate from the explanation to
-    their own code, it fits the "learning aid grounded in user code" positioning and needs no
-    editor extension.
-    Verify: `grep -rn "EXPLAIN_ERRORS_EDITOR_URL" explain_errors/` on `main` returns a match.
-
-10. **django-docs-links**: cross-reference explanations to official Django documentation.
+9. **django-docs-links**: cross-reference explanations to official Django documentation.
     Ship the cheap version first: a static map of exception type plus context to a docs
     anchor. No index, no embeddings, no build step. A real docs link is verifiable in a way
     generated prose is not, which matters most for the learning audience and shrinks the
@@ -312,7 +302,7 @@ compared, and each run changes one variable relative to the previous baseline.
     or retrieval signal.
     Verify: a docs-map module (for example `explain_errors/docs_links.py`) exists on `main`.
 
-11. **README positioning rewrite**: after retrieval-arms-eval, describing whatever retrieval
+10. **README positioning rewrite**: after retrieval-arms-eval, describing whatever retrieval
     behavior has shipped by then (the outcome of the retrieval-default open question may change
     the positioning text). Not before. The README documents shipped behavior; anything
     earlier is a promise that has to be kept.
