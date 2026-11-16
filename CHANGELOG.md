@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Documentation
+
+- README documents Google Gemini via the OpenAI-compatible endpoint, including RAG embeddings and thinking-model settings.
+
 ## 0.12.0 (2026-11-10)
 
 ### Changed
