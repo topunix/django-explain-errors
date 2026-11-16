@@ -10,8 +10,7 @@ State sources:
 - PyPI: https://pypi.org/pypi/django-explain-errors/json (`info.version`)
 - GitHub releases and tags: `topunix/django-explain-errors`
 
-Deleting shipped items is housekeeping, not correctness. Doing it in the same PR that
-ships the work keeps the file short; skipping it costs one lookup.
+The maintainer deletes shipped items after the PR merges.
 
 Items reference each other by name, never by number, so renumbering stays safe.
 Task specs live in `docs/tasks/` in the repo, versioned, deleted after execution. They do
