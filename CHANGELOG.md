@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Opt-in "Open in editor" links in the debug page banner. Set `EXPLAIN_ERRORS_EDITOR_URL` (for example `vscode://file/{path}:{line}`) to link application traceback frames and RAG-cited source files. Off by default; DEBUG only.
+
 ### Documentation
 
 - README documents Google Gemini via the OpenAI-compatible endpoint, including RAG embeddings and thinking-model settings.

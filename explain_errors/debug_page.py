@@ -1,8 +1,14 @@
 import logging
+import os
 import re
+import traceback
+from urllib.parse import quote
 
+from django.conf import settings
 from django.utils.html import escape
 from django.views.debug import ExceptionReporter
+
+from explain_errors.tracebacks import _is_library_frame
 
 logger = logging.getLogger(__name__)
 
@@ -231,6 +237,93 @@ def _render_inline(escaped_line):
     return "".join(rendered)
 
 
+_BLOCKED_SCHEMES = ("javascript:", "data:", "vbscript:")
+_LINKS_BLOCK_STYLE = "margin: 8px 0 0 0; font-size: 13px;"
+_LINKS_TITLE_STYLE = "font-weight: bold; margin: 6px 0 2px 0;"
+_LINK_LIST_STYLE = "margin: 2px 0; padding-inline-start: 1.5em; list-style: disc;"
+
+
+def _editor_url(template, path, line):
+    """Render the editor URL template, or None if the scheme is blocked.
+
+    Raises KeyError, IndexError or ValueError for an invalid template.
+    """
+    url = template.format(path=quote(path, safe="/:\\"), line=int(line))
+    if url.strip().lower().startswith(_BLOCKED_SCHEMES):
+        logger.debug("explain_errors: editor link with a blocked scheme skipped")
+        return None
+    return url
+
+
+def _link_items(template, entries):
+    items = []
+    for path, line, label in entries:
+        url = _editor_url(template, path, line)
+        if url is None:
+            continue
+        items.append(
+            '<li style="{}"><a href="{}" rel="noopener noreferrer">{}</a></li>'.format(
+                _LI_STYLE, escape(url), escape(label)
+            )
+        )
+    return items
+
+
+def _build_links_html(tb, cited_files):
+    """HTML for the "Open in editor" block, or "" when off, empty or invalid."""
+    template = getattr(settings, "EXPLAIN_ERRORS_EDITOR_URL", None)
+    if not template or not settings.DEBUG:
+        return ""
+
+    frames = []
+    for frame in traceback.extract_tb(tb):
+        if _is_library_frame(frame.filename):
+            continue
+        frames.append(
+            (
+                frame.filename,
+                frame.lineno,
+                "{}:{} in {}".format(frame.filename, frame.lineno, frame.name),
+            )
+        )
+
+    cited = []
+    seen = set()
+    for file_path, start_line in cited_files or ():
+        if (file_path, start_line) in seen:
+            continue
+        seen.add((file_path, start_line))
+        abs_path = file_path if os.path.isabs(file_path) else os.path.abspath(file_path)
+        cited.append((abs_path, start_line, "{}:{}".format(file_path, start_line)))
+
+    try:
+        sections = []
+        for title, entries in (
+            ("Traceback frames", frames),
+            ("Retrieved source", cited),
+        ):
+            items = _link_items(template, entries)
+            if items:
+                sections.append(
+                    '<div style="{}">{}</div><ul style="{}">{}</ul>'.format(
+                        _LINKS_TITLE_STYLE, title, _LINK_LIST_STYLE, "".join(items)
+                    )
+                )
+    except (KeyError, IndexError, ValueError):
+        logger.warning(
+            "explain_errors: invalid EXPLAIN_ERRORS_EDITOR_URL template, "
+            "no editor links rendered",
+            exc_info=True,
+        )
+        return ""
+
+    if not sections:
+        return ""
+    return '<div style="{}"><div style="{}">Open in editor</div>{}</div>'.format(
+        _LINKS_BLOCK_STYLE, _LINKS_TITLE_STYLE, "".join(sections)
+    )
+
+
 class ExplainErrorsExceptionReporter(ExceptionReporter):
     """Injects the explain_errors explanation into the technical 500 page.
 
@@ -253,6 +346,18 @@ class ExplainErrorsExceptionReporter(ExceptionReporter):
 
             anchor_index = html.index(ANCHOR)
             banner = BANNER_TEMPLATE.format(explanation=render_explanation_html(explanation))
+            try:
+                links = _build_links_html(
+                    self.tb, getattr(request, "_explain_errors_cited_files", None)
+                )
+            except Exception:
+                logger.warning(
+                    "explain_errors: failed to build editor links", exc_info=True
+                )
+                links = ""
+            if links:
+                end = banner.rindex("</section>")
+                banner = banner[:end] + links + "\n" + banner[end:]
             return html[:anchor_index] + banner + html[anchor_index:]
         except Exception:
             logger.warning(

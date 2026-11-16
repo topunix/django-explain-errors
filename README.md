@@ -177,6 +177,26 @@ otherwise, for example when `runserver` is reached by IP over plain HTTP).
 unexpected debug page layout, anything else) logs one warning and leaves Django's normal
 debug page untouched. This code can never turn a working debug page into a broken one.
 
+### Open in editor links
+
+Set `EXPLAIN_ERRORS_EDITOR_URL` to a URL template and the banner gains an "Open in editor"
+block with links to your own code: the application frames of the traceback (library frames
+are skipped) and, when RAG is enabled, the project source chunks that were included in the
+prompt. Off by default (`None`), and only rendered when `DEBUG` is `True`.
+
+```python
+# VS Code
+EXPLAIN_ERRORS_EDITOR_URL = "vscode://file/{path}:{line}"
+# PyCharm
+EXPLAIN_ERRORS_EDITOR_URL = "pycharm://open?file={path}&line={line}"
+```
+
+`{path}` is the absolute file path (percent-encoded, with `/`, `:` and `\\` left readable) and
+`{line}` is the line number. A template with any other placeholder renders no links and logs
+one warning. Templates that produce a `javascript:`, `data:` or `vbscript:` URL are ignored.
+When the same error is replayed from the dedup cache, only the frame links are shown. Links
+appear on the HTML debug page only, not in stdout or the JSON 500 response.
+
 **Custom exception reporters.** If your project already sets a custom
 `DEFAULT_EXCEPTION_REPORTER`, or something earlier in the request sets
 `request.exception_reporter_class`, `explain_errors` leaves it alone and skips injection
@@ -236,6 +256,7 @@ and keeps using that for later calls. Other providers keep receiving `max_tokens
 | `OPENAI_MAX_TRACEBACK_CHARS` | No | Total character budget for the traceback sent to the model. Application frames (your own code, as opposed to Django, the standard library, or installed packages) are always kept; library frames fill whatever budget remains, nearest the raise point first, with an `... N library frames omitted ...` line where frames are dropped. If the application frames alone exceed the budget, falls back to keeping the last N characters of the raw traceback. Defaults to `3000`. |
 | `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE` | No | When `True` (the default), the middleware returns `None` (after printing the explanation to stdout, unless `EXPLAIN_ERRORS_PRINT_STDOUT = False`), so exception handling continues normally and Django renders its debug page (with the explanation banner, controlled by `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE`). Set to `False` to instead return a JSON 500 response, which ends exception handling early (see Compatibility above). |
 | `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` | No | When `True` (the default), also injects the explanation as a banner into Django's debug page, in addition to stdout. Requires `EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=True` (the default); see Debug Page Injection above. |
+| `EXPLAIN_ERRORS_EDITOR_URL` | No | Default `None` (off). A URL template with `{path}` and `{line}` placeholders, for example `vscode://file/{path}:{line}`. When set, the debug page banner links to your application's traceback frames and RAG-cited source files. DEBUG only; see Open in editor links above. |
 | `EXPLAIN_ERRORS_PRINT_STDOUT` | No | When `True` (the default), prints the explanation to stdout. Set to `False` to suppress it, for example when `EXPLAIN_ERRORS_INJECT_DEBUG_PAGE` already shows it in the browser. The failure message (when the model API call itself errors) always prints. For requests where nobody views the debug page (API clients, which get Django's plain-text error response, and `fetch`/HTMX requests, whose HTML response is never displayed), stdout is the only channel that shows the explanation, so turn this off only in browser-first workflows. |
 | `OPENAI_BASE_URL` (env or settings) | No | Base URL for any OpenAI-compatible API (for example Ollama at `http://localhost:11434/v1`). When set, a missing API key is replaced with a placeholder since local servers do not require one. |
 | `EXPLAIN_ERRORS_MAX_CALLS` | No | Together with `EXPLAIN_ERRORS_WINDOW_SECONDS`, caps API spend to at most this many explanations within a rolling window; once the cap is hit, further errors in that window are not sent for explanation until an earlier call ages out. Defaults to `5`. |
