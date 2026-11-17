@@ -38,6 +38,7 @@ printed to stdout (each controllable by its own setting). Active only when
 
 - Never include the Claude Code session URL or the "Generated with Claude Code" line in
   commit messages or PR bodies. The `Co-Authored-By` trailer stays.
+  The GitHub tool can append an attribution footer after a PR, comment, or review is submitted. Read each one back immediately after creating it and edit out any such footer before reporting the work as done.
 - Commit identity: always commit with
   `--author="topunix <833824+topunix@users.noreply.github.com>"`. Do not change
   git config and do not use `-c user.name`/`user.email`. The committer stays the
