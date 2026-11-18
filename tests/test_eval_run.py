@@ -4,12 +4,14 @@ Fully mocked / subprocess-isolated, same as the rest of the eval harness's
 plumbing tests: no real API calls anywhere in this file.
 """
 import glob
+import hashlib
 import json
 import os
 import subprocess
 import sys
 import random
 import runpy
+import tempfile
 import threading
 import time
 import unittest
@@ -18,6 +20,9 @@ from unittest.mock import patch
 from evals.fixtures import FIXTURES_BY_NAME
 from evals.run import (
     _capture_call,
+    _extract_setting,
+    _settings_source,
+    build_judge_sources,
     estimate_cost_usd,
     is_generation_failure,
     judge_all,
@@ -300,6 +305,142 @@ class BuildJudgeSourceTest(unittest.TestCase):
     def test_fixture_without_templates_field_gets_no_template_source(self):
         labels = self._labels("none_attribute")
         self.assertFalse(any(label.endswith(".html") for label in labels))
+
+
+    def test_settings_fixture_gets_only_the_named_setting(self):
+        labels = self._labels("missing_tag_library")
+        label = "fixture_app/settings.py (INSTALLED_APPS)"
+        self.assertIn(label, labels)
+        content = self._contents("missing_tag_library")[label]
+        self.assertTrue(content.startswith("INSTALLED_APPS = ["), content)
+        self.assertIn('"django.contrib.auth"', content)
+        # Appended last, so existing entries keep their order.
+        self.assertEqual(labels[-1], label)
+        for entry in self.results["missing_tag_library"]:
+            for forbidden in ("SECRET_KEY", "DATABASES", "MIDDLEWARE"):
+                self.assertNotIn(forbidden, entry["content"], entry["label"])
+
+    def test_blog_located_fixture_gets_no_settings_entry(self):
+        for name in ("none_attribute", "str_recursion"):
+            self.assertFalse(
+                any("settings.py" in label for label in self._labels(name)), name
+            )
+
+
+class ExtractSettingTest(unittest.TestCase):
+    TEXT = (
+        "DEBUG = True\n"
+        "INSTALLED_APPS = [\n"
+        '    "a",\n'
+        '    "b",\n'
+        "]\n"
+        "MIDDLEWARE = []\n"
+        "TYPED: list = [1]\n"
+        "\n"
+        "def f():\n"
+        "    NESTED = 1\n"
+        "\n"
+        "class C:\n"
+        "    CLS = 2\n"
+    )
+
+    def test_returns_exact_segment_for_list_assignment(self):
+        self.assertEqual(
+            _extract_setting(self.TEXT, "INSTALLED_APPS"),
+            'INSTALLED_APPS = [\n    "a",\n    "b",\n]',
+        )
+
+    def test_handles_annotated_assignment(self):
+        self.assertEqual(_extract_setting(self.TEXT, "TYPED"), "TYPED: list = [1]")
+
+    def test_missing_name_returns_none(self):
+        self.assertIsNone(_extract_setting(self.TEXT, "SECRET_KEY"))
+
+    def test_ignores_nested_assignments(self):
+        self.assertIsNone(_extract_setting(self.TEXT, "NESTED"))
+        self.assertIsNone(_extract_setting(self.TEXT, "CLS"))
+
+    def test_does_not_return_neighbouring_setting(self):
+        segment = _extract_setting(self.TEXT, "INSTALLED_APPS")
+        self.assertNotIn("MIDDLEWARE", segment)
+        self.assertNotIn("DEBUG", segment)
+
+
+class _FakeFixture:
+    name = "fake"
+
+    def __init__(self, location):
+        self.expected_fix_location = location
+
+
+class SettingsSourceTest(unittest.TestCase):
+    def test_non_settings_location_adds_nothing(self):
+        for location in (
+            "blog/views.py:latest_post",
+            "blog/models.py:Comment",
+            "blog/templates/blog/post_archive.html",
+        ):
+            self.assertIsNone(_settings_source(_FakeFixture(location)), location)
+
+    def test_settings_location_without_name_raises(self):
+        with self.assertRaises(RuntimeError):
+            _settings_source(_FakeFixture("fixture_app/settings.py"))
+        with self.assertRaises(RuntimeError):
+            _settings_source(_FakeFixture("fixture_app/settings.py:"))
+
+    def test_unknown_setting_raises(self):
+        with self.assertRaises(RuntimeError):
+            _settings_source(_FakeFixture("fixture_app/settings.py:NOPE_NOT_A_SETTING"))
+
+    def test_missing_file_raises(self):
+        with self.assertRaises(RuntimeError):
+            _settings_source(_FakeFixture("fixture_app/nope/settings.py:INSTALLED_APPS"))
+
+    def test_known_setting_is_labelled_path_and_name(self):
+        label, content = _settings_source(
+            _FakeFixture("fixture_app/settings.py:INSTALLED_APPS")
+        )
+        self.assertEqual(label, "fixture_app/settings.py (INSTALLED_APPS)")
+        self.assertTrue(content.startswith("INSTALLED_APPS = ["))
+
+
+class JudgeAllSourceTextsTest(unittest.TestCase):
+    def _calls(self, name):
+        return [
+            {
+                "fixture": name,
+                "rag_enabled": rag,
+                "run_index": 0,
+                "traceback": "tb",
+                "explanation": f"{name}/{rag}",
+            }
+            for rag in (False, True)
+        ]
+
+    def test_given_texts_reach_compare_and_builder_is_not_called(self):
+        fixture = FIXTURES_BY_NAME["none_attribute"]
+        with patch("evals.judge.get_judge_client", return_value=object()), patch(
+            "evals.judge.get_judge_model", return_value="m"
+        ), patch("evals.judge.compare", return_value={"fixture": fixture.name}) as compare, patch(
+            "evals.run._build_judge_source"
+        ) as build:
+            judge_all(
+                [fixture],
+                self._calls(fixture.name),
+                {},
+                seed=1,
+                source_texts={fixture.name: "GIVEN TEXT"},
+            )
+        build.assert_not_called()
+        self.assertEqual(compare.call_args[0][4], "GIVEN TEXT")
+
+    def test_build_judge_sources_formats_per_fixture(self):
+        fixtures = [FIXTURES_BY_NAME["none_attribute"], FIXTURES_BY_NAME["str_recursion"]]
+        with patch("evals.run._build_judge_source", return_value=[("lbl", "body")]) as build:
+            texts = build_judge_sources(fixtures, {})
+        self.assertEqual(set(texts), {f.name for f in fixtures})
+        self.assertEqual(build.call_count, 2)
+        self.assertEqual(texts["none_attribute"], "### lbl\n```\nbody\n```")
 
 
 class JudgeAllConcurrencyTest(unittest.TestCase):
@@ -732,9 +873,14 @@ class EvalHarnessEndToEndTest(unittest.TestCase):
         os.makedirs(results_dir, exist_ok=True)
         before = set(glob.glob(os.path.join(results_dir, "*.json")))
 
+        log_fd, compare_log = tempfile.mkstemp(suffix=".json")
+        os.close(log_fd)
+        self.addCleanup(lambda: os.path.exists(compare_log) and os.remove(compare_log))
+        env = dict(os.environ, EVAL_E2E_COMPARE_LOG=compare_log)
         proc = subprocess.run(
             [sys.executable, "-m", "tests._eval_harness_e2e_runner", "--runs", "1"],
             cwd=REPO_ROOT,
+            env=env,
             capture_output=True,
             text=True,
             timeout=180,
@@ -759,10 +905,21 @@ class EvalHarnessEndToEndTest(unittest.TestCase):
             "seed",
             "timing",
             "judge_retries_total",
+            "judge_sources",
             "calls",
             "judgments",
         ):
             self.assertIn(key, data)
+
+        with open(compare_log) as f:
+            received = json.load(f)
+        run_fixtures = {call["fixture"] for call in data["calls"]}
+        self.assertEqual(set(data["judge_sources"]), run_fixtures)
+        for name, entry in data["judge_sources"].items():
+            self.assertEqual(
+                entry["sha256"], hashlib.sha256(entry["text"].encode("utf-8")).hexdigest()
+            )
+            self.assertEqual(received[name], [entry["text"]], name)
         self.assertEqual(data["judge_retries_total"], 0)
         self.assertEqual(data["timing"]["judge_concurrency"], 8)
         self.assertGreaterEqual(data["timing"]["generator_seconds"], 0)

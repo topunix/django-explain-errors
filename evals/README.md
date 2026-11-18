@@ -279,6 +279,17 @@ is recorded as a judge failure, counted separately, and excluded from the
 win counts and per-question tallies. It is never silently dropped and
 never counted as a tie.
 
+### Judge sources
+
+New top-level field in the results JSON (additive; results files written
+before it existed lack it, and nothing in the harness requires it):
+
+- `judge_sources`: maps each fixture name that was run to
+  `{"sha256": <hex sha256 of the UTF-8 text>, "text": <text>}`, where `text`
+  is exactly the "Relevant project source" section passed to the judge for
+  that fixture (the same text for both sides of every comparison). It lets a
+  score change be checked against a change in the judge's evidence.
+
 ### Generation failures
 
 A call whose explanation is `null`, empty, or whitespace-only is a generation
@@ -360,8 +371,10 @@ Methodology history and fixed harness bugs: see METHODOLOGY.md.
 
 The judge is shown the failing function's own source
 (`_build_judge_source` in `evals/run.py`), the same source RAG-on's
-retriever draws from. So part of RAG-on's `no_fabrication` advantage is
-judge and generator overlapping on material RAG-off never sees, not
+retriever draws from. For a fixture whose fix location is a setting
+(for example `fixture_app/settings.py:INSTALLED_APPS`), the judge also sees
+that one named setting, extracted alone and never the whole file. So part
+of RAG-on's `no_fabrication` advantage is judge and generator overlapping on material RAG-off never sees, not
 necessarily RAG-on being more careful. And claim statuses are
 spot-checked, not exhaustively audited: `evals/spotcheck.py` (see below)
 flagged 14 of 363 claims on the 2026-09-17 run and all 14 held up on
