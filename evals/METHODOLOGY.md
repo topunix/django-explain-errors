@@ -2,6 +2,18 @@
 
 History of how the eval questions evolved and harness bugs that affected past results. Current results and limitations are in README.md.
 
+**2026-11-18: judge source section changed, judge inputs now recorded.** For
+a fixture whose `expected_fix_location` is a `settings.py` setting
+(`missing_tag_library`, `fixture_app/settings.py:INSTALLED_APPS`), the judge
+source section now also includes that one named setting, extracted alone.
+Before this, the judge never saw `INSTALLED_APPS`, so a correct RAG-on claim
+about it could be marked absent or contradicted (Evals #9,
+`missing_tag_library` run 1). The results JSON also gains a `judge_sources`
+field recording the exact source text and its sha256 per fixture. Results from
+this commit on are not directly comparable with the gpt-6-luna baseline
+(`20261022T005116Z.json`) or Evals #9, because the judge's inputs differ. A
+new baseline run is required.
+
 **The truncation caveat, resolved.** Before the
 `app-frame-preserving truncation` fix, `OPENAI_MAX_TRACEBACK_CHARS` kept
 only the tail of the raw traceback, which for a Django ORM stack
