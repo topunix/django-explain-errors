@@ -10,6 +10,7 @@ plumbing here with everything mocked; they do not run this script for real.
 import argparse
 import ast
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -112,13 +113,67 @@ def _extract_url_pattern(urls_text, view_name):
     return None
 
 
+def _extract_setting(settings_text, name):
+    """Return the exact source text of the module-level assignment (plain or
+    annotated) to `name` in `settings_text`, or None if there isn't one.
+    Only top-level statements count: an assignment of the same name nested
+    in a function or class is ignored.
+    """
+    tree = ast.parse(settings_text)
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        else:
+            continue
+        if any(isinstance(t, ast.Name) and t.id == name for t in targets):
+            return ast.get_source_segment(settings_text, node)
+    return None
+
+
+def _settings_source(fixture):
+    """The (label, content) pair for the one setting a fixture's
+    `expected_fix_location` names, or None when that location is not a
+    `settings.py` file. Raises RuntimeError rather than ever falling back
+    to the whole file.
+    """
+    location = fixture.expected_fix_location
+    path, sep, name = location.rpartition(":")
+    if not sep:
+        path, name = location, ""
+    if Path(path).name != "settings.py":
+        return None
+    if not name:
+        raise RuntimeError(
+            f"fixture {fixture.name!r}: expected_fix_location {location!r} is a "
+            "settings file but names no setting (expected '<path>:<name>')"
+        )
+    settings_path = EVALS_DIR / path
+    if not settings_path.is_file():
+        raise RuntimeError(
+            f"fixture {fixture.name!r}: settings file {settings_path} does not "
+            "exist -- the judge source extractor is out of sync with the fixture app"
+        )
+    content = _extract_setting(settings_path.read_text(), name)
+    if content is None:
+        raise RuntimeError(
+            f"fixture {fixture.name!r}: could not find setting {name!r} in "
+            f"{settings_path} -- the judge source extractor is out of sync "
+            "with the fixture app"
+        )
+    return (f"{path} ({name})", content)
+
+
 def _build_judge_source(fixture, exception):
     """(label, content) pairs for evals.judge.format_source_section: the
     failing function's own source (plus, for a method, one level of any
     other same-class method it reaches via `self.<name>` --
     see `_extract_function_source`), the urls.py pattern that routes to
-    this fixture's view, and any templates the fixture names via its
-    `templates` field. Deliberately not whole modules -- 300 lines of
+    this fixture's view, any templates the fixture names via its
+    `templates` field, and, when `expected_fix_location` is a settings.py
+    file, that one named setting (extracted alone, never the whole file; see
+    `_extract_setting`). Deliberately not whole modules -- 300 lines of
     unrelated views is exactly the kind of noise that makes the judge
     assume "unverified" rather than check.
 
@@ -178,6 +233,10 @@ def _build_judge_source(fixture, exception):
     for template_name in fixture.templates:
         template_path = BLOG_DIR / "templates" / template_name
         sources.append((template_name, template_path.read_text()))
+
+    setting_source = _settings_source(fixture)
+    if setting_source is not None:
+        sources.append(setting_source)
 
     return sources
 
@@ -489,7 +548,24 @@ def run_all(fixtures, runs):
 DEFAULT_JUDGE_CONCURRENCY = 8
 
 
-def judge_all(fixtures, calls, exceptions_by_fixture, concurrency=1, seed=None):
+def build_judge_sources(fixtures, exceptions_by_fixture):
+    """{fixture_name: source_text}: the formatted judge source section,
+    built once per fixture. The same text goes to the judge for both sides
+    of every comparison.
+    """
+    from evals.judge import format_source_section
+
+    return {
+        fixture.name: format_source_section(
+            _build_judge_source(fixture, exceptions_by_fixture.get(fixture.name))
+        )
+        for fixture in fixtures
+    }
+
+
+def judge_all(
+    fixtures, calls, exceptions_by_fixture, concurrency=1, seed=None, source_texts=None
+):
     """Pair up each fixture+run's RAG-off and RAG-on calls and judge them.
     Returns the list of judgment records, in fixture-then-run order whatever
     `concurrency` is.
@@ -499,8 +575,14 @@ def judge_all(fixtures, calls, exceptions_by_fixture, concurrency=1, seed=None):
     concurrently (`concurrency` > 1), so position randomization does not
     depend on thread scheduling or on N. `concurrency=1` runs the calls
     inline, one at a time, like the original sequential loop.
+
+    `source_texts` ({fixture_name: source_text}) is used as given when
+    passed; otherwise it is built here with `build_judge_sources`.
     """
-    from evals.judge import compare, format_source_section, get_judge_client, get_judge_model
+    from evals.judge import compare, get_judge_client, get_judge_model
+
+    if source_texts is None:
+        source_texts = build_judge_sources(fixtures, exceptions_by_fixture)
 
     client = get_judge_client()
     model = get_judge_model()
@@ -510,9 +592,7 @@ def judge_all(fixtures, calls, exceptions_by_fixture, concurrency=1, seed=None):
 
     jobs = []
     for fixture in fixtures:
-        source_text = format_source_section(
-            _build_judge_source(fixture, exceptions_by_fixture.get(fixture.name))
-        )
+        source_text = source_texts[fixture.name]
         run_indices = sorted(
             {c["run_index"] for c in calls if c["fixture"] == fixture.name}
         )
@@ -891,12 +971,14 @@ def main(argv=None):
 
     print(f"Judging (concurrency {args.judge_concurrency})...")
     judge_start = time.perf_counter()
+    source_texts = build_judge_sources(fixtures, exceptions_by_fixture)
     judgments = judge_all(
         fixtures,
         calls,
         exceptions_by_fixture,
         concurrency=args.judge_concurrency,
         seed=args.seed,
+        source_texts=source_texts,
     )
     judge_seconds = time.perf_counter() - judge_start
     timing = {
@@ -919,6 +1001,13 @@ def main(argv=None):
         "seed": args.seed,
         "timing": timing,
         "judge_retries_total": tally_retries(judgments),
+        "judge_sources": {
+            name: {
+                "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                "text": text,
+            }
+            for name, text in source_texts.items()
+        },
         "calls": calls,
         "judgments": judgments,
     }

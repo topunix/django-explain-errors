@@ -12,6 +12,7 @@ redo it with different settings, so `blog.models` would never become a
 valid app in-process -- this has to run somewhere Django hasn't been set up
 yet.
 """
+import json
 import os
 import sys
 from unittest.mock import MagicMock, patch
@@ -61,9 +62,26 @@ def main():
 
     with patch("openai.OpenAI", side_effect=_fake_generator_client):
         with patch("evals.judge.get_judge_client", return_value=_fake_judge_client()):
+            import evals.judge
             from evals.run import main as run_main
 
-            run_main(sys.argv[1:])
+            # Optionally record the source_text each compare() call received,
+            # so a test can check it against the results JSON's judge_sources.
+            log_path = os.environ.get("EVAL_E2E_COMPARE_LOG")
+            real_compare = evals.judge.compare
+            received = {}
+
+            def recording_compare(client, model, traceback, fixture, source_text, *a, **kw):
+                received.setdefault(fixture.name, set()).add(source_text)
+                return real_compare(
+                    client, model, traceback, fixture, source_text, *a, **kw
+                )
+
+            with patch("evals.judge.compare", side_effect=recording_compare):
+                run_main(sys.argv[1:])
+            if log_path:
+                with open(log_path, "w") as f:
+                    json.dump({k: sorted(v) for k, v in received.items()}, f)
 
 
 if __name__ == "__main__":

@@ -35,7 +35,7 @@ def main():
 
     _reset_database()
 
-    fixture_names = ["none_attribute", "str_recursion", "unexpected_kwarg", "url_name_typo"]
+    fixture_names = ["none_attribute", "str_recursion", "unexpected_kwarg", "url_name_typo", "missing_tag_library"]
 
     results = {}
     with override_settings(DEBUG=True, EXPLAIN_ERRORS_PRESERVE_DEBUG_PAGE=False):

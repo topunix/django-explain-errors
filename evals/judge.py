@@ -237,7 +237,9 @@ def format_source_section(sources):
     -- into the judge prompt's "Relevant project source" block.
 
     Callers (see evals/run.py) always pass the same fixed set of modules
-    plus whatever a fixture's own `templates` field names, for every
+    plus whatever a fixture's own `templates` field names and, for a
+    settings-located fixture, the one setting its `expected_fix_location`
+    names (not the whole settings file), for every
     comparison, regardless of which side had RAG -- so the shape of this
     section itself can't tip the judge off.
     """

@@ -35,6 +35,8 @@ class Fixture:
     # for fixtures whose bug lives in a template's own content rather than in
     # views.py/models.py/urls.py. Sent to the judge alongside those three
     # modules -- see evals/judge.py and evals/run.py's _build_judge_source.
+    # (A fixture whose expected_fix_location is a settings.py setting needs
+    # no entry here: _build_judge_source adds that one named setting itself.)
     # Most fixtures don't need this; the three modules already cover them.
     templates: tuple = field(default_factory=tuple)
 
