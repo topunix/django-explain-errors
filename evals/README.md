@@ -373,8 +373,8 @@ The judge is shown the failing function's own source
 (`_build_judge_source` in `evals/run.py`), the same source RAG-on's
 retriever draws from. For a fixture whose fix location is a setting
 (for example `fixture_app/settings.py:INSTALLED_APPS`), the judge also sees
-that one named setting, extracted alone and never the whole file. So part of RAG-on's `no_fabrication` advantage is
-judge and generator overlapping on material RAG-off never sees, not
+that one named setting, extracted alone and never the whole file. So part
+of RAG-on's `no_fabrication` advantage is judge and generator overlapping on material RAG-off never sees, not
 necessarily RAG-on being more careful. And claim statuses are
 spot-checked, not exhaustively audited: `evals/spotcheck.py` (see below)
 flagged 14 of 363 claims on the 2026-09-17 run and all 14 held up on

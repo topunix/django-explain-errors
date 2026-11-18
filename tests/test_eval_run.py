@@ -6,12 +6,12 @@ plumbing tests: no real API calls anywhere in this file.
 import glob
 import hashlib
 import json
-import tempfile
 import os
 import subprocess
 import sys
 import random
 import runpy
+import tempfile
 import threading
 import time
 import unittest
@@ -19,10 +19,10 @@ from unittest.mock import patch
 
 from evals.fixtures import FIXTURES_BY_NAME
 from evals.run import (
+    _capture_call,
     _extract_setting,
     _settings_source,
     build_judge_sources,
-    _capture_call,
     estimate_cost_usd,
     is_generation_failure,
     judge_all,
